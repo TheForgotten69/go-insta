@@ -55,6 +55,7 @@ func main() {
 	target := flag.String("user", "instagram", "public account to look up")
 	pause := flag.Duration("pause", 2*time.Second, "delay between calls")
 	writes := flag.Bool("writes", false, "also run reversible writes on your own account")
+	albumSize := flag.Int("album", 2, "photos in the -writes album")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -91,7 +92,7 @@ func main() {
 		}
 		writeAccount(r, insta)
 		writePost(r, insta)
-		writeAlbum(r, insta, dir)
+		writeAlbum(r, insta, dir, *albumSize)
 		writeStory(r, insta)
 	}
 
@@ -150,7 +151,7 @@ func readAccount(r *runner, insta *goinsta.Instagram, dir string) {
 		if err := page(ctx, a.Next); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("%d inbox items, %d likes", len(a.Items), a.Counts.Likes), nil
+		return fmt.Sprintf("%d inbox items, badge %d", len(a.Items), a.Badges.Total), nil
 	})
 	r.step("Collections + Posts", func() (string, error) {
 		c, err := insta.Collections().Collect(ctx, 0)
@@ -410,12 +411,16 @@ func writePost(r *runner, insta *goinsta.Instagram) {
 	r.step("item.Archive", func() (string, error) { return "", post.Archive(ctx) })
 }
 
-func writeAlbum(r *runner, insta *goinsta.Instagram, dir string) {
+func writeAlbum(r *runner, insta *goinsta.Instagram, dir string, size int) {
 	ctx := r.ctx
 	var album *goinsta.Item
 	r.step("UploadAlbum", func() (string, error) {
 		var err error
-		album, err = insta.UploadAlbum(ctx, []io.Reader{testJPEG(0), testJPEG(80)}, goinsta.PostOptions{Caption: "go-insta album smoke"})
+		photos := make([]io.Reader, size)
+		for i := range photos {
+			photos[i] = testJPEG(uint8(i * 160 / size))
+		}
+		album, err = insta.UploadAlbum(ctx, photos, goinsta.PostOptions{Caption: "go-insta album smoke"})
 		if err != nil {
 			return "", err
 		}

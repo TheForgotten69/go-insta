@@ -108,7 +108,7 @@ var (
 	ErrSessionInvalid     = errors.New("session is missing authorization or user id")
 
 	ErrInvalidImage       = errors.New("invalid file type, please use a jpeg or webp image")
-	ErrCarouselMediaLimit = errors.New("an album takes 2 to 10 photos")
+	ErrCarouselMediaLimit = errors.New("an album takes 2 to 20 photos")
 
 	ErrNoMore        = errors.New("no more posts available, page end has been reached")
 	ErrMediaDeleted  = errors.New("sorry, this media has been deleted")

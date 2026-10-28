@@ -254,10 +254,12 @@ func (insta *Instagram) UploadPhoto(ctx context.Context, r io.Reader, opts PostO
 	return insta.configure(ctx, urlConfigure, payload)
 }
 
-// UploadAlbum posts 2 to 10 JPEG or WebP images as one carousel. All images are
+const maxAlbumPhotos = 20
+
+// UploadAlbum posts 2 to 20 JPEG or WebP images as one carousel. All images are
 // checked before any upload starts; the uploads then run in parallel.
 func (insta *Instagram) UploadAlbum(ctx context.Context, photos []io.Reader, opts PostOptions) (*Item, error) {
-	if len(photos) < 2 || len(photos) > 10 {
+	if len(photos) < 2 || len(photos) > maxAlbumPhotos {
 		return nil, ErrCarouselMediaLimit
 	}
 	ps := make([]*photo, len(photos))

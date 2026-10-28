@@ -49,7 +49,7 @@ type User struct {
 	RecentlyBestiedByCount         int     `json:"recently_bestied_by_count"`
 	AccountType                    int     `json:"account_type"`
 	AccountBadges                  []any   `json:"account_badges,omitempty"`
-	FbIdV2                         Int64   `json:"fbid_"`
+	FbIdV2                         Int64   `json:"fbid_v2"`
 	IsUnpublished                  bool    `json:"is_unpublished"`
 	UserTagsCount                  int     `json:"usertags_count"`
 	UserTagReviewEnabled           bool    `json:"usertag_review_enabled"`
@@ -70,7 +70,7 @@ type User struct {
 	CanSeePrimaryCountryInsettings bool    `json:"can_see_primary_country_in_settings"`
 	CanFollowHashtag               bool    `json:"can_follow_hashtag"`
 
-	CanBoostPosts                  bool   `json:"can_boost_posts"`
+	CanBoostPosts                  bool   `json:"can_boost_post"`
 	CanSeeOrganicInsights          bool   `json:"can_see_organic_insights"`
 	CanConvertToBusiness           bool   `json:"can_convert_to_business"`
 	CanCreateSponsorTags           bool   `json:"can_create_sponsor_tags"`
@@ -178,6 +178,21 @@ type User struct {
 	MerchantCheckoutStyle                      string   `json:"merchant_checkout_style"`
 
 	ProfilePic []byte
+}
+
+func (user *User) UnmarshalJSON(b []byte) error {
+	type plain User
+	aux := struct {
+		*plain
+		AltID Int64 `json:"id"`
+	}{plain: (*plain)(user)}
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+	if user.ID == 0 {
+		user.ID = aux.AltID
+	}
+	return nil
 }
 
 func (user *User) SetInstagram(insta *Instagram) {

@@ -137,6 +137,9 @@ func TestUploadAlbumBounds(t *testing.T) {
 	if _, err := insta.UploadAlbum(t.Context(), []io.Reader{testJPEG(t, 10, 10)}, PostOptions{}); !errors.Is(err, ErrCarouselMediaLimit) {
 		t.Errorf("one photo: %v", err)
 	}
+	if _, err := insta.UploadAlbum(t.Context(), make([]io.Reader, maxAlbumPhotos+1), PostOptions{}); !errors.Is(err, ErrCarouselMediaLimit) {
+		t.Errorf("%d photos: %v", maxAlbumPhotos+1, err)
+	}
 	png := bytes.NewReader([]byte("\x89PNG\r\n\x1a\n"))
 	if _, err := insta.UploadAlbum(t.Context(), []io.Reader{testJPEG(t, 10, 10), png}, PostOptions{}); !errors.Is(err, ErrInvalidImage) {
 		t.Errorf("png child: %v", err)

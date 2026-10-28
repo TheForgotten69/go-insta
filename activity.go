@@ -2,38 +2,82 @@ package goinsta
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 )
 
-// Activity pages the notifications inbox; Items holds the page's new and old
-// stories, Counts the badge counts of the last page. The first page marks the
-// inbox as seen, as the app does.
+// Activity pages the notifications inbox; Items holds the page's priority, new
+// and old stories, Badges the badge counts of the last page. The first page
+// marks the inbox as seen, as the app does.
 type Activity struct {
 	*Pager[RecentItems]
-	Counts ActivityCounts
+	Badges ActivityBadges
 }
 
-type ActivityCounts struct {
-	Campaign      int `json:"campaign_notification"`
-	CommentLikes  int `json:"comment_likes"`
-	Comments      int `json:"comments"`
-	Fundraiser    int `json:"fundraiser"`
-	Likes         int `json:"likes"`
-	NewPosts      int `json:"new_posts"`
-	PhotosOfYou   int `json:"photos_of_you"`
-	Relationships int `json:"relationships"`
-	Requests      int `json:"requests"`
-	Shopping      int `json:"shopping_notification"`
-	UserTags      int `json:"usertags"`
+// ActivityBadges decodes badging_info.badge_count_breakdown, a list of
+// {badge_use_case_id, count}.
+type ActivityBadges struct {
+	Total           int
+	ActivityFeedDot int
+	BrandedContent  int
+	Campaign        int
+	CommentLikes    int
+	Comments        int
+	Fundraiser      int
+	Likes           int
+	MediaToApprove  int
+	NewPosts        int
+	Promotional     int
+	Relationships   int
+	Shopping        int
+	StoryMentions   int
+	UserTags        int
+}
+
+func (b *ActivityBadges) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Total     int `json:"total_badge_count"`
+		Breakdown []struct {
+			UseCase string `json:"badge_use_case_id"`
+			Count   int    `json:"count"`
+		} `json:"badge_count_breakdown"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*b = ActivityBadges{Total: raw.Total}
+	fields := map[string]*int{
+		"activity_feed_dot_badge": &b.ActivityFeedDot,
+		"branded_content":         &b.BrandedContent,
+		"campaign_notification":   &b.Campaign,
+		"comment_likes":           &b.CommentLikes,
+		"comments":                &b.Comments,
+		"fundraiser":              &b.Fundraiser,
+		"likes":                   &b.Likes,
+		"media_to_approve":        &b.MediaToApprove,
+		"new_posts":               &b.NewPosts,
+		"promotional":             &b.Promotional,
+		"relationships":           &b.Relationships,
+		"shopping_notification":   &b.Shopping,
+		"story_mentions":          &b.StoryMentions,
+		"usertags":                &b.UserTags,
+	}
+	for _, e := range raw.Breakdown {
+		if f, ok := fields[e.UseCase]; ok {
+			*f = e.Count
+		}
+	}
+	return nil
 }
 
 type activityPage struct {
-	Counts      ActivityCounts `json:"counts"`
-	NewStories  []RecentItems  `json:"new_stories"`
-	OldStories  []RecentItems  `json:"old_stories"`
-	NextID      string         `json:"next_max_id"`
-	LastChecked float64        `json:"last_checked"`
-	FirstRecTs  float64        `json:"pagination_first_record_timestamp"`
+	Badges          ActivityBadges `json:"badging_info"`
+	PriorityStories []RecentItems  `json:"priority_stories"`
+	NewStories      []RecentItems  `json:"new_stories"`
+	OldStories      []RecentItems  `json:"old_stories"`
+	NextID          string         `json:"next_max_id"`
+	LastChecked     float64        `json:"last_checked"`
+	FirstRecTs      float64        `json:"pagination_first_record_timestamp"`
 }
 
 type RecentItems struct {
@@ -91,13 +135,17 @@ func (insta *Instagram) Activity() *Activity {
 		if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlActivityRecent, Query: query}, &page); err != nil {
 			return nil, "", err
 		}
+		var items []RecentItems
 		if last == nil {
 			if err := insta.MarkActivitySeen(ctx); err != nil {
 				return nil, "", err
 			}
+			// Later pages repeat the priority stories.
+			items = page.PriorityStories
 		}
-		last, act.Counts = &page, page.Counts
-		return append(page.NewStories, page.OldStories...), page.NextID, nil
+		last, act.Badges = &page, page.Badges
+		items = append(items, page.NewStories...)
+		return append(items, page.OldStories...), page.NextID, nil
 	})
 	return act
 }

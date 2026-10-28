@@ -75,9 +75,7 @@ type Item struct {
 	// Use PreviewComments function instead of getting it directly.
 	Previewcomments any `json:"preview_comments,omitempty"`
 
-	Tags struct {
-		In []Tag `json:"in"`
-	} `json:"usertags,omitempty"`
+	Tags                 Tag      `json:"usertags,omitempty"`
 	FbUserTags           Tag      `json:"fb_user_tags"`
 	CanViewerSave        bool     `json:"can_viewer_save"`
 	OrganicTrackingToken string   `json:"organic_tracking_token"`
@@ -417,8 +415,14 @@ func (item *Item) TopLikers() []string {
 	switch s := item.Toplikers.(type) {
 	case string:
 		return []string{s}
-	case []string:
-		return s
+	case []any:
+		out := make([]string, 0, len(s))
+		for _, v := range s {
+			if name, ok := v.(string); ok {
+				out = append(out, name)
+			}
+		}
+		return out
 	}
 	return nil
 }

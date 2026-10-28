@@ -24,10 +24,10 @@ func (insta *Instagram) Reels() *Pager[*Item] {
 		friendly := "IgApi: clips/discover/stream/"
 		if maxID != "" {
 			q["max_id"] = maxID
-			// Tail paging was captured only for reels opened from the feed (clips_viewer_newsfeed_you).
 			q["reason"] = "tailload"
 			friendly += "_tail"
 		}
+		// Lines hold different reels; the last one carries the cursor.
 		var resp struct {
 			Items []struct {
 				Media *Item `json:"media"`
@@ -37,31 +37,39 @@ func (insta *Instagram) Reels() *Pager[*Item] {
 				MaxID         string `json:"max_id"`
 			} `json:"paging_info"`
 		}
-		err := insta.callJSON(ctx, &reqOptions{
+		var items []*Item
+		seen := map[string]bool{}
+		err := insta.callLines(ctx, &reqOptions{
 			Endpoint:     urlClipsDiscover,
 			FriendlyName: friendly,
 			IsPost:       true,
-			Stream:       true,
 			Query:        q,
 			ExtraHeaders: map[string]string{
 				"X-Ig-Tail-Load-Request": strconv.FormatBool(maxID != ""),
 				"X-Fb-Request-Analytics-Tags": `{"network_tags":{"product":"` + insta.sess.AppID +
 					`","surface":"clips_viewer_clips_tab","request_category":"api","purpose":"fetch","retry_attempt":"0"}}`,
 			},
-		}, &resp)
-		if err != nil {
-			return nil, "", err
-		}
-		maxID = resp.Paging.MaxID
-		items := make([]*Item, 0, len(resp.Items))
-		for _, it := range resp.Items {
-			if it.Media != nil {
+		}, func(line []byte) error {
+			resp.Items = nil
+			if err := json.Unmarshal(line, &resp); err != nil {
+				return err
+			}
+			for _, it := range resp.Items {
+				if it.Media == nil || seen[it.Media.ID] {
+					continue
+				}
+				seen[it.Media.ID] = true
 				setToItem(it.Media, insta, "clips_viewer_clips_tab")
 				it.Media.Index = pos
 				pos++
 				items = append(items, it.Media)
 			}
+			return nil
+		})
+		if err != nil {
+			return nil, "", err
 		}
+		maxID = resp.Paging.MaxID
 		return items, cursorIf(resp.Paging.MoreAvailable, maxID), nil
 	})
 }

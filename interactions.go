@@ -36,7 +36,7 @@ func (item *Item) basePayload() map[string]string {
 	}
 }
 
-func (item *Item) postSigned(ctx context.Context, endpoint string, payload map[string]string, form map[string]string) ([]byte, error) {
+func (item *Item) postSigned(ctx context.Context, endpoint string, payload any, form map[string]string) ([]byte, error) {
 	q, err := signedBody(payload)
 	if err != nil {
 		return nil, err
@@ -73,7 +73,13 @@ func (item *Item) Save(ctx context.Context) error {
 		"like_bubble_user_ids": "",
 	})
 	delete(p, "is_carousel_bumped_post")
-	_, err := item.postSigned(ctx, fmt.Sprintf(urlMediaSave, item.ID), p, nil)
+	// Unlike like and comment, save sends a real array.
+	payload := make(map[string]any, len(p))
+	for k, v := range p {
+		payload[k] = v
+	}
+	payload["floating_context_items"] = []string{}
+	_, err := item.postSigned(ctx, fmt.Sprintf(urlMediaSave, item.ID), payload, nil)
 	return err
 }
 
@@ -131,6 +137,7 @@ func (c *Comments) fetch(ctx context.Context) ([]*Comment, string, error) {
 		q["min_id"] = c.minID
 		q["sort_order"] = "popular"
 	}
+	// Each NDJSON line holds different comments under the same cursor.
 	var page struct {
 		Items                   []*Comment `json:"comments"`
 		CommentCount            Int64      `json:"comment_count"`
@@ -138,19 +145,30 @@ func (c *Comments) fetch(ctx context.Context) ([]*Comment, string, error) {
 		HasMoreHeadloadComments bool       `json:"has_more_headload_comments"`
 		NextMinID               string     `json:"next_min_id"`
 	}
-	err := item.insta.callJSON(ctx, &reqOptions{
+	var items []*Comment
+	seen := map[json.Number]bool{}
+	err := item.insta.callLines(ctx, &reqOptions{
 		Endpoint: fmt.Sprintf(urlStreamComments, item.ID),
-		Stream:   true,
 		Query:    q,
-	}, &page)
+	}, func(line []byte) error {
+		page.Items = nil
+		if err := json.Unmarshal(line, &page); err != nil {
+			return err
+		}
+		for _, cm := range page.Items {
+			if !seen[cm.ID] {
+				seen[cm.ID] = true
+				cm.setValues(item)
+				items = append(items, cm)
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, "", err
 	}
-	for _, cm := range page.Items {
-		cm.setValues(item)
-	}
 	c.Count, c.Caption, c.minID = page.CommentCount, page.Caption, page.NextMinID
-	return page.Items, cursorIf(page.HasMoreHeadloadComments, page.NextMinID), nil
+	return items, cursorIf(page.HasMoreHeadloadComments, page.NextMinID), nil
 }
 
 func (c *Comment) likePayload() (map[string]string, error) {

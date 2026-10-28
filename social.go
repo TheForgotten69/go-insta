@@ -195,7 +195,7 @@ func (insta *Instagram) Friendships(ctx context.Context, ids ...int64) (map[stri
 		IsPost:   true,
 		Query: map[string]string{
 			"_uuid":               insta.uuid,
-			"include_followed_by": "false",
+			"include_followed_by": "true",
 			"user_ids":            strings.Join(s, ", "),
 		},
 	}, &resp)

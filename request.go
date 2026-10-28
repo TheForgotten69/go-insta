@@ -264,6 +264,23 @@ func (insta *Instagram) callJSON(ctx context.Context, o *reqOptions, v any) erro
 	return json.Unmarshal(body, v)
 }
 
+func (insta *Instagram) callLines(ctx context.Context, o *reqOptions, each func(line []byte) error) error {
+	o.Chunked = true
+	body, err := insta.call(ctx, o)
+	if err != nil {
+		return err
+	}
+	for line := range bytes.Lines(body) {
+		if line = bytes.TrimSpace(line); len(line) == 0 {
+			continue
+		}
+		if err := each(line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (insta *Instagram) sendRequest(ctx context.Context, o *reqOptions) (body []byte, h http.Header, err error) {
 	for attempt := 0; ; attempt++ {
 		body, h, err = insta.sendOnce(ctx, o)

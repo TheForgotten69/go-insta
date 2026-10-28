@@ -1,7 +1,6 @@
 package goinsta
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -142,9 +141,9 @@ func (insta *Instagram) fetchStories(ctx context.Context, id int64) (*Reel, erro
 	return &resp.Reel, nil
 }
 
-// reelsBatch is how many reels one reels_media_stream call loads. Captures only
-// show single-reel calls; a 52-item highlight is 1.4 MB, so 10 stays well
-// under maxBodySize.
+// reelsBatch is how many reels one reels_media_stream call loads. Captures show
+// up to 3 per call; a 52-item highlight is 1.4 MB, so 10 stays well under
+// maxBodySize.
 const reelsBatch = 10
 
 // LoadReels fills the items of every reel that is not Loaded, one request per
@@ -188,29 +187,28 @@ func (insta *Instagram) FetchReels(ctx context.Context, reelIDs ...string) (map[
 	if err != nil {
 		return nil, err
 	}
-	body, err := insta.call(ctx, &reqOptions{
-		Endpoint:     urlReelsMediaStream,
-		IsPost:       true,
-		Chunked:      true,
-		Query:        q,
-		ExtraHeaders: map[string]string{"X-Ig-Accept-Hint": "feed"},
-	})
-	if err != nil {
-		return nil, err
-	}
 	// Each line carries one reel, or client_hints with an empty reels map.
 	reels := make(map[string]*Reel, len(reelIDs))
-	for line := range bytes.Lines(body) {
+	err = insta.callLines(ctx, &reqOptions{
+		Endpoint:     urlReelsMediaStream,
+		IsPost:       true,
+		Query:        q,
+		ExtraHeaders: map[string]string{"X-Ig-Accept-Hint": "feed"},
+	}, func(line []byte) error {
 		var chunk struct {
 			Reels map[string]*Reel `json:"reels"`
 		}
 		if err := json.Unmarshal(line, &chunk); err != nil {
-			return nil, err
+			return err
 		}
 		for id, r := range chunk.Reels {
 			r.setValues(insta)
 			reels[id] = r
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return reels, nil
 }

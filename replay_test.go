@@ -379,8 +379,8 @@ func TestUserInfoStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "user_info_stream"), r.sent[0])
-	if u.Username == "" || u.insta != insta {
-		t.Errorf("user not parsed: %q", u.Username)
+	if u.Username == "" || u.insta != insta || u.FbIdV2 == 0 {
+		t.Errorf("user not parsed: %q fbid_v2 %d", u.Username, u.FbIdV2)
 	}
 	if got := insta.Session().Rur; got != "ROTATED" {
 		t.Errorf("rur not rotated from ig-set header: %q", got)
@@ -504,6 +504,9 @@ func TestMediaInteractions(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "save"), r.sent[1])
+	if _, ok := r.sent[1].payload["floating_context_items"].([]any); !ok {
+		t.Errorf("save floating_context_items = %#v, want a JSON array", r.sent[1].payload["floating_context_items"])
+	}
 
 	sc := fixture(t, "stream_comments")
 	scItem := testItem(insta, strings.Split(sc.Path, "/")[4])
@@ -512,8 +515,8 @@ func TestMediaInteractions(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkRequest(t, sc, r.sent[2])
-	if cs.Caption.Text == "" && len(cs.Items) == 0 {
-		t.Error("comments not parsed")
+	if len(cs.Items) != 15 {
+		t.Errorf("comments = %d, want all 15 across the 3 NDJSON lines", len(cs.Items))
 	}
 
 	if _, err := it.AddNote(t.Context(), ""); err != nil {
@@ -567,8 +570,8 @@ func TestCommentThreads(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkRequest(t, page, r.sent[0])
-	if len(cs.Items) == 0 || cs.Items[0].item != it {
-		t.Errorf("page not parsed: %d", len(cs.Items))
+	if len(cs.Items) != 14 || cs.Items[0].item != it {
+		t.Errorf("page = %d comments, want all 14 across the 3 NDJSON lines", len(cs.Items))
 	}
 
 	child := fixture(t, "inline_child_comments")
