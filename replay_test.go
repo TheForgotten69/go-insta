@@ -182,6 +182,19 @@ var volatileHeaders = map[string]bool{
 	"x-fb-rmd": true,
 }
 
+// The fixtures come from the older build (2026-10-27). The current build drops the
+// zero-rating headers and adds a network-stack set; TestCurrentBuildProfile checks
+// those against the 2026-10-28 captures instead.
+var olderBuildOnly = map[string]bool{
+	"x-zero-a-device-id": true, "x-zero-balance": true, "x-zero-d-device-id": true,
+	"x-zero-eh": true, "x-zero-f-device-id": true, "zero-http-network-interface": true,
+}
+var currentBuildOnly = map[string]bool{
+	"x-fb-appnetsession-nid": true, "x-fb-appnetsession-sid": true, "x-fb-network-properties": true,
+	"x-fb-session-id": true, "x-fb-session-private": true, "x-fb-tasos-td-v2-config": true,
+	"x-meta-tasos-congestion-config": true, "x-meta-tasos-dcc-constraint": true,
+}
+
 // Headers the app sends that are deliberately not replicated.
 var skippedHeaders = map[string]bool{
 	"x-ig-app-start-time": true, "x-ig-app-start-request": true, "x-cm-bandwidth-kbps": true,
@@ -218,7 +231,7 @@ func checkRequest(t *testing.T, want httplog.Entry, got sent, extraOK ...string)
 
 	var missingH, diffH []string
 	for k, v := range want.ReqHeaders {
-		if skippedHeaders[k] {
+		if skippedHeaders[k] || olderBuildOnly[k] {
 			continue
 		}
 		g := got.req.Header.Get(k)
@@ -236,8 +249,9 @@ func checkRequest(t *testing.T, want httplog.Entry, got sent, extraOK ...string)
 	}
 	var extraH []string
 	for k := range got.req.Header {
-		if _, ok := want.ReqHeaders[strings.ToLower(k)]; !ok && !volatileHeaders[strings.ToLower(k)] {
-			extraH = append(extraH, strings.ToLower(k))
+		lk := strings.ToLower(k)
+		if _, ok := want.ReqHeaders[lk]; !ok && !volatileHeaders[lk] && !currentBuildOnly[lk] {
+			extraH = append(extraH, lk)
 		}
 	}
 	sort.Strings(extraH)

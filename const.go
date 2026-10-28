@@ -3,11 +3,12 @@ package goinsta
 import "errors"
 
 const (
-	// The app sends REST and uploads to b.i.instagram.com, GraphQL to i.instagram.com.
-	baseUrl       = "https://b.i.instagram.com/"
+	// The current build (captures from 2026-10-28) sends logged-in REST, GraphQL and
+	// uploads to i.instagram.com; only cold-start calls still use b.i.instagram.com.
+	baseUrl       = "https://i.instagram.com/"
 	graphQLUrl    = "https://i.instagram.com/graphql/query"
-	instaAPIUrl   = "https://b.i.instagram.com/api/v1/"
-	instaAPIUrlv2 = "https://b.i.instagram.com/api/v2/"
+	instaAPIUrl   = "https://i.instagram.com/api/v1/"
+	instaAPIUrlv2 = "https://i.instagram.com/api/v2/"
 
 	// Values captured from Instagram for Android 453.0.0.55.79.
 	appVersion     = "453.0.0.55.79"

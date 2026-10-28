@@ -31,3 +31,47 @@ func TestTimelineParsesWrappedItems(t *testing.T) {
 		t.Errorf("paging state wrong: index=%d more=%v next=%q", tl.Items[1].Index, tl.MoreAvailable, tl.NextID)
 	}
 }
+
+// recorder answers every request with {"status":"ok"} and keeps the last one.
+type recorder struct{ last *http.Request }
+
+func (r *recorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.last = req
+	return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"status":"ok"}`)), Request: req}, nil
+}
+
+// Header profile of the current build, measured over 529 logged-in requests in the
+// 2026-10-28 captures: everything goes to i.instagram.com, the zero-rating headers
+// are gone and the network-stack headers are present.
+func TestCurrentBuildProfile(t *testing.T) {
+	insta, _ := newReplay(t)
+	rec := &recorder{}
+	insta.SetHTTPClient(&http.Client{Transport: rec})
+	if _, err := insta.Account.ReelSettings(); err != nil {
+		t.Fatal(err)
+	}
+	h := rec.last.Header
+	if rec.last.URL.Host != "i.instagram.com" {
+		t.Errorf("host = %s, want i.instagram.com", rec.last.URL.Host)
+	}
+	for _, k := range []string{"X-Zero-Balance", "X-Zero-Eh", "X-Zero-D-Device-Id", "Zero-Http-Network-Interface"} {
+		if h.Get(k) != "" {
+			t.Errorf("%s sent; the current build dropped it", k)
+		}
+	}
+	want := map[string]string{
+		"X-Fb-Network-Properties":        "Validated;",
+		"X-Fb-Tasos-Td-V2-Config":        "prod_android",
+		"X-Meta-Tasos-Congestion-Config": "v6_1",
+		"X-Fb-Rmd":                       "state=URL_ELIGIBLE",
+	}
+	for k, v := range want {
+		if h.Get(k) != v {
+			t.Errorf("%s = %q, want %q", k, h.Get(k), v)
+		}
+	}
+	if !strings.HasSuffix(h.Get("X-Fb-Appnetsession-Nid"), ",Wifi") || len(h.Get("X-Fb-Appnetsession-Sid")) != 32 ||
+		!strings.HasPrefix(h.Get("X-Fb-Session-Id"), "nid=") || h.Get("X-Fb-Session-Private") == "" {
+		t.Errorf("network session headers malformed: %v", h)
+	}
+}

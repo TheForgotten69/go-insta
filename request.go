@@ -162,7 +162,7 @@ func (insta *Instagram) newRequest(o *reqOptions) (*http.Request, error) {
 		"X-Fb-Friendly-Name":                            friendly,
 		"X-Fb-Http-Engine":                              "Tigon/MNS/TCP",
 		"X-Fb-Request-Analytics-Tags":                   `{"network_tags":{"product":"` + s.AppID + `","surface":"undefined","request_category":"` + category + `","purpose":"fetch","retry_attempt":"0"}}`,
-		"X-Fb-Rmd":                                      "fail=Server:INVALID_MAP,Default:INVALID_MAP;v=;ip=;tkn=;reqTime=0;recvTime=0",
+		"X-Fb-Rmd":                                      "state=URL_ELIGIBLE",
 		"X-Fb-Server-Cluster":                           "True",
 		"X-Fb-Conn-Uuid-Client":                         strings.ReplaceAll(generateUUID(), "-", ""),
 		"X-Ig-Android-Id":                               insta.dID,
@@ -185,12 +185,15 @@ func (insta *Instagram) newRequest(o *reqOptions) (*http.Request, error) {
 		"X-Pigeon-Rawclienttime":                        fmt.Sprintf("%.3f", float64(time.Now().UnixMilli())/1000),
 		"X-Pigeon-Session-Id":                           insta.psID,
 		"X-Tigon-Is-Retry":                              "False",
-		"X-Zero-A-Device-Id":                            "",
-		"X-Zero-Balance":                                "INIT",
-		"X-Zero-D-Device-Id":                            insta.uuid,
-		"X-Zero-Eh":                                     "",
-		"X-Zero-F-Device-Id":                            insta.fID,
-		"Zero-Http-Network-Interface":                   "ethernet",
+		// Network-stack headers of the current build (absent from the older capture).
+		"X-Fb-Appnetsession-Nid":         insta.net.nid,
+		"X-Fb-Appnetsession-Sid":         insta.net.sid,
+		"X-Fb-Network-Properties":        "Validated;",
+		"X-Fb-Session-Id":                insta.net.sessionID,
+		"X-Fb-Session-Private":           insta.net.sessionPrivate,
+		"X-Fb-Tasos-Td-V2-Config":        "prod_android",
+		"X-Meta-Tasos-Congestion-Config": "v6_1",
+		"X-Meta-Tasos-Dcc-Constraint":    "active=0;dcc=0;mit=0;alw=0;level=none;mode=0",
 	}
 	if uid == "0" {
 		delete(headers, "Ig-U-Ds-User-Id") // the logged-out app sends only the intended id

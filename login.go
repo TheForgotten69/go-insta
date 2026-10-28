@@ -61,30 +61,19 @@ func (insta *Instagram) Login(username, password string) error {
 	return insta.sendLogin(username, password, flow)
 }
 
-// loggedOutRequest applies the logged-out auth-host profile: no zero-rating
-// headers and www-claim 0.
+// loggedOutRequest is the logged-out profile: www-claim 0, no x-fb-rmd, no
+// bandwidth sample yet.
 func (insta *Instagram) loggedOutRequest(endpoint, friendly, clientEndpoint string, query map[string]string) *reqOptions {
 	return &reqOptions{
-		Endpoint:     endpoint,
-		IsPost:       true,
-		Ignore429:    true, // surface the rate limit instead of sleeping 8 minutes
-		FriendlyName: "IgApi: " + friendly,
-		Query:        query,
-		IgnoreHeaders: []string{
-			"X-Zero-A-Device-Id", "X-Zero-Balance", "X-Zero-D-Device-Id", "X-Zero-Eh",
-			"X-Zero-F-Device-Id", "Zero-Http-Network-Interface", "X-Fb-Rmd",
-		},
+		Endpoint:      endpoint,
+		IsPost:        true,
+		Ignore429:     true, // surface the rate limit instead of sleeping 8 minutes
+		FriendlyName:  "IgApi: " + friendly,
+		Query:         query,
+		IgnoreHeaders: []string{"X-Fb-Rmd"},
 		ExtraHeaders: map[string]string{
-			"X-Fb-Appnetsession-Nid":         insta.net.nid,
-			"X-Fb-Appnetsession-Sid":         insta.net.sid,
-			"X-Fb-Tasos-Td-V2-Config":        "prod_android",
-			"X-Meta-Tasos-Congestion-Config": "v6_1",
-			"X-Meta-Tasos-Dcc-Constraint":    "active=0;dcc=0;mit=0;alw=0;level=none;mode=0",
-			"X-Fb-Network-Properties":        "Validated;",
-			"X-Fb-Session-Id":                insta.net.sessionID,
-			"X-Fb-Session-Private":           insta.net.sessionPrivate,
-			"X-Ig-Www-Claim":                 "0",
-			"X-Ig-Client-Endpoint":           clientEndpoint,
+			"X-Ig-Www-Claim":       "0",
+			"X-Ig-Client-Endpoint": clientEndpoint,
 			// No bandwidth sample exists yet on a logged-out cold start.
 			"X-Ig-Bandwidth-Speed-Kbps":   "-1.000",
 			"X-Ig-Bandwidth-Totalbytes-B": "0",

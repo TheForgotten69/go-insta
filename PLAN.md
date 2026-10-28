@@ -5,7 +5,8 @@ passes 26/26 live (all reads, plus follow/unfollow and post → comment → dele
 
 Done since the login fix: attestation re-signed before its 1 h expiry, `SetProxy` keeps the app TLS
 fingerprint (http CONNECT and socks5), rotated password key stored from the login response,
-recommended-post (`explore_story`) feed items parsed.
+recommended-post (`explore_story`) feed items parsed, logged-in request profile moved to the
+current build.
 
 Ownership: **[you]** = capture or key work done outside this repo; **[code]** = changes in this repo.
 
@@ -33,10 +34,11 @@ Ownership: **[you]** = capture or key work done outside this repo; **[code]** = 
 
 ## Request profile
 
-7. **Logged-in headers are from an older build** — `log_http.txt` predates the
-   `x-fb-appnetsession-*` / `x-meta-tasos-*` / `x-fb-session-*` headers the current app sends on
-   every request, and still sends the old `x-fb-rmd` value. **[you]** recapture a logged-in feed
-   session; **[code]** update the profile and refresh `testdata/fixtures.json`.
+7. **Fixture refresh** — the request profile now follows the 2026-10-28 captures (host
+   `i.instagram.com`, no `x-zero-*`, network-stack headers; `TestCurrentBuildProfile`). The
+   replay fixtures still come from the older build, so request bodies are only checked against
+   it. 14 endpoints exist in the new captures and can be re-fixtured from them; the write
+   endpoints (like, follow, comment, upload…) need a new logged-in capture that uses them. **[code]**/**[you]**
 8. **HTTP/2 fingerprint** — header order (app: app-layer headers sorted, then network-stack
     headers sorted), pseudo-header order and SETTINGS still differ from the app. Not needed for
     login so far. **[you]** `just capture feed` fills `h2/*.jsonl` (h2-dump.py); **[code]** switch
