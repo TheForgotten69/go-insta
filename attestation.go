@@ -190,8 +190,12 @@ func (a *Attestation) loggedOut() (*Attestation, error) {
 	return &c, nil
 }
 
-// SetAttestation generates both headers once and uses them for every request,
-// replacing the values carried in the session.
+// attestationMaxAge is when the headers get re-signed: x-meta-usdid expires one
+// hour after signing.
+const attestationMaxAge = 50 * time.Minute
+
+// SetAttestation signs both headers and uses them for every request, replacing
+// the values carried in the session. They are re-signed before they expire.
 func (insta *Instagram) SetAttestation(a *Attestation) error {
 	if err := insta.applyAttestation(a); err != nil {
 		return err
@@ -214,5 +218,19 @@ func (insta *Instagram) applyAttestation(a *Attestation) error {
 		}
 		insta.headerOptions.Store("X-Meta-Usdid", usdid)
 	}
+	insta.mu.Lock()
+	insta.curAtt, insta.attSignedAt = a, now
+	insta.mu.Unlock()
 	return nil
+}
+
+// refreshAttestation re-signs the active attestation once it nears expiry.
+func (insta *Instagram) refreshAttestation(now time.Time) error {
+	insta.mu.Lock()
+	a, signed := insta.curAtt, insta.attSignedAt
+	insta.mu.Unlock()
+	if a == nil || now.Sub(signed) < attestationMaxAge {
+		return nil
+	}
+	return insta.applyAttestation(a)
 }

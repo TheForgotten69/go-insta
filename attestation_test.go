@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -162,4 +163,35 @@ func TestKeyHashDerivation(t *testing.T) {
 func sha256sum(s string) []byte {
 	h := sha256.Sum256([]byte(s))
 	return h[:]
+}
+
+func TestAttestationResignedBeforeExpiry(t *testing.T) {
+	insta, _ := newReplay(t)
+	a, _, _ := newTestAttestation(t)
+	if err := insta.SetAttestation(a); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := insta.headerOptions.Load("X-Meta-Usdid")
+
+	if err := insta.refreshAttestation(time.Now().Add(10 * time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := insta.headerOptions.Load("X-Meta-Usdid"); v != before {
+		t.Fatal("re-signed while still fresh")
+	}
+
+	insta.mu.Lock()
+	insta.attSignedAt = time.Now().Add(-55 * time.Minute)
+	insta.mu.Unlock()
+	if err := insta.refreshAttestation(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := insta.headerOptions.Load("X-Meta-Usdid")
+	if after == before {
+		t.Fatal("usdid not re-signed near expiry")
+	}
+	exp, _ := strconv.ParseInt(strings.Split(after.(string), ".")[1], 10, 64)
+	if time.Until(time.Unix(exp, 0)) < 55*time.Minute {
+		t.Errorf("new usdid expires too soon: %v", time.Unix(exp, 0))
+	}
 }

@@ -1,7 +1,6 @@
 package goinsta
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -31,7 +30,9 @@ type Instagram struct {
 	pwPubKey string // base64 of a PEM RSA key, from ig-set-password-encryption-pub-key
 	pwKeyID  string
 
-	att *Attestation // registered keys, restored after the logged-out login flow
+	att         *Attestation // registered keys, restored after the logged-out login flow
+	curAtt      *Attestation // the one currently signing headers (guarded by mu)
+	attSignedAt time.Time
 
 	Timeline    *Timeline
 	Account     *Account
@@ -101,7 +102,7 @@ func New(s Session) (*Instagram, error) {
 		net:          newNetSession(),
 		userAgent:    s.UserAgent,
 		sess:         s,
-		c:            &http.Client{Transport: newAppTransport()},
+		c:            &http.Client{Transport: directTransport()},
 		infoHandler:  defaultHandler,
 		warnHandler:  defaultHandler,
 		debugHandler: defaultHandler,
@@ -214,21 +215,30 @@ func (insta *Instagram) SetHTTPTransport(transport http.RoundTripper) { insta.c.
 
 func (insta *Instagram) SetTimeout(t time.Duration) { insta.c.Timeout = t }
 
-func (insta *Instagram) SetProxy(url string, insecure bool, forceHTTP2 bool) error {
-	uri, err := neturl.Parse(url)
+// SetProxy routes requests through an http:// (CONNECT) or socks5:// proxy while
+// keeping the app's TLS fingerprint. insecure skips certificate verification,
+// which an intercepting proxy such as mitmproxy needs.
+func (insta *Instagram) SetProxy(rawURL string, insecure bool) error {
+	u, err := neturl.Parse(rawURL)
 	if err != nil {
 		return err
 	}
-	insta.c.Transport = &http.Transport{
-		Proxy:             http.ProxyURL(uri),
-		ForceAttemptHTTP2: forceHTTP2,
-		TLSClientConfig:   &tls.Config{InsecureSkipVerify: insecure},
+	t, err := newAppTransport(u, insecure)
+	if err != nil {
+		return err
 	}
+	insta.c.Transport = t
 	return nil
 }
 
 func (insta *Instagram) UnsetProxy() {
-	insta.c.Transport = newAppTransport()
+	insta.c.Transport = directTransport()
+}
+
+// directTransport is the app-fingerprinted transport without a proxy.
+func directTransport() http.RoundTripper {
+	t, _ := newAppTransport(nil, false) // only proxy setup can fail
+	return t
 }
 
 func (insta *Instagram) GetAccountFamily() ([]byte, error) {

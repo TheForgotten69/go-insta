@@ -36,11 +36,13 @@ func buildBloksHeaders(pairs map[string]string) string {
 func TestApplyLoginResponse(t *testing.T) {
 	insta, _ := newReplay(t)
 	body := buildBloksHeaders(map[string]string{
-		"IG-Set-Authorization":   "Bearer IGT:2:eyJkc191c2VyX2lkIjoiNDI4NjUifQ==",
-		"ig-set-ig-u-rur":        "CLN,42865,1800000000:01abcdef",
-		"x-ig-set-www-claim":     "hmac.AR1234567890abcdef",
-		"ig-set-ig-u-ds-user-id": "42865264907",
-		"ig-set-x-mid":           "abcdefMIDvalue",
+		"IG-Set-Authorization":               "Bearer IGT:2:eyJkc191c2VyX2lkIjoiNDI4NjUifQ==",
+		"ig-set-ig-u-rur":                    "CLN,42865,1800000000:01abcdef",
+		"x-ig-set-www-claim":                 "hmac.AR1234567890abcdef",
+		"ig-set-ig-u-ds-user-id":             "42865264907",
+		"ig-set-x-mid":                       "abcdefMIDvalue",
+		"IG-Set-Password-Encryption-Key-Id":  "182",
+		"IG-Set-Password-Encryption-Pub-Key": "LS0tLS1CRUdJTiBQVUJMSUMgS0VZ+/=",
 	})
 	if err := insta.applyLoginResponse([]byte(body)); err != nil {
 		t.Fatal(err)
@@ -60,6 +62,9 @@ func TestApplyLoginResponse(t *testing.T) {
 	}
 	if insta.Account.ID != 42865264907 {
 		t.Errorf("ds-user-id = %d", insta.Account.ID)
+	}
+	if s.PasswordKeyID != "182" || s.PasswordPubKey != "LS0tLS1CRUdJTiBQVUJMSUMgS0VZ+/=" {
+		t.Errorf("rotated password key not stored: %q %q", s.PasswordKeyID, s.PasswordPubKey)
 	}
 }
 

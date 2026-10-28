@@ -370,6 +370,8 @@ var (
 	reClaim = regexp.MustCompile(`(?i)"x-ig-set-www-claim":\s*"([^"]*)"`)
 	reDSID  = regexp.MustCompile(`(?i)"ig-set-ig-u-ds-user-id":\s*"?([0-9]+)"?`)
 	reMid   = regexp.MustCompile(`(?i)"ig-set-x-mid":\s*"([^"]*)"`)
+	rePwKey = regexp.MustCompile(`(?i)"ig-set-password-encryption-pub-key":\s*"([A-Za-z0-9+/=]+)"`)
+	rePwKID = regexp.MustCompile(`(?i)"ig-set-password-encryption-key-id":\s*"?([0-9]+)"?`)
 )
 
 // applyLoginResponse pulls the session headers out of the Bloks payload, where
@@ -390,6 +392,11 @@ func (insta *Instagram) applyLoginResponse(body []byte) error {
 	store(reRur, "Ig-U-Rur")
 	store(reClaim, "X-Ig-Www-Claim")
 	store(reMid, "X-Mid")
+	if k, id := rePwKey.FindSubmatch(flat), rePwKID.FindSubmatch(flat); k != nil && id != nil {
+		insta.mu.Lock()
+		insta.pwPubKey, insta.pwKeyID = string(k[1]), string(id[1])
+		insta.mu.Unlock()
+	}
 	if m := reDSID.FindSubmatch(flat); m != nil {
 		if id, err := strconv.ParseInt(string(m[1]), 10, 64); err == nil {
 			insta.Account.ID = Int64(id)

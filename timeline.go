@@ -23,6 +23,10 @@ type Timeline struct {
 type feedCache struct {
 	Items []struct {
 		MediaOrAd *Item `json:"media_or_ad"`
+		// Recommended posts (accounts with few follows) arrive wrapped.
+		ExploreStory *struct {
+			MediaOrAd *Item `json:"media_or_ad"`
+		} `json:"explore_story"`
 		EndOfFeed struct {
 			Pause    bool   `json:"pause"`
 			Title    string `json:"title"`
@@ -154,10 +158,14 @@ func (tl *Timeline) fetch(reason string) error {
 	tl.NextID = page.NextID
 	tl.MoreAvailable = page.MoreAvailable
 	for _, it := range page.Items {
-		if it.MediaOrAd != nil {
-			setToItem(it.MediaOrAd, insta, "feed_timeline")
-			it.MediaOrAd.Index = len(tl.Items)
-			tl.Items = append(tl.Items, it.MediaOrAd)
+		item := it.MediaOrAd
+		if item == nil && it.ExploreStory != nil {
+			item = it.ExploreStory.MediaOrAd
+		}
+		if item != nil {
+			setToItem(item, insta, "feed_timeline")
+			item.Index = len(tl.Items)
+			tl.Items = append(tl.Items, item)
 		}
 	}
 	return nil

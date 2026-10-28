@@ -76,6 +76,9 @@ func (o *reqOptions) url() (*url.URL, error) {
 }
 
 func (insta *Instagram) newRequest(o *reqOptions) (*http.Request, error) {
+	if err := insta.refreshAttestation(time.Now()); err != nil {
+		return nil, fmt.Errorf("re-sign attestation: %w", err)
+	}
 	u, err := o.url()
 	if err != nil {
 		return nil, err
