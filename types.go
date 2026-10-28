@@ -17,53 +17,24 @@ type Device struct {
 	Chipset          string `json:"chipset"`
 }
 
-type School struct{}
-
 type PicURLInfo struct {
 	Height int    `json:"height"`
 	URL    string `json:"url"`
 	Width  int    `json:"width"`
 }
 
-type ErrorN struct {
-	Message   string `json:"message"`
-	Endpoint  string `json:"endpoint"`
-	Status    string `json:"status"`
-	ErrorType string `json:"error_type"`
-}
-
-type Error503 struct {
-	Message string
-}
-
-func (e Error503) Error() string {
-	return e.Message
-}
-
-func (e ErrorN) Error() string {
-	return fmt.Sprintf(
-		"Error while calling %s, status code %s: %s (%s)",
-		e.Endpoint, e.Status, e.Message, e.ErrorType,
-	)
-}
-
-type Error400 struct {
-	Status  string `json:"status"`
-	Message string `json:"message"`
-
+// APIError is a non-2xx response that maps to none of the sentinel errors.
+type APIError struct {
+	StatusCode int    `json:"-"`
+	Endpoint   string `json:"-"`
+	Status     string `json:"status"`
+	Message    string `json:"message"`
 	ErrorType  string `json:"error_type"`
 	ErrorTitle string `json:"error_title"`
 	ErrorBody  string `json:"error_body"`
-
-	Code int
-
-	Endpoint string `json:"endpoint"`
-
-	Payload struct {
-		ClientContext string `json:"client_context"`
-		Message       string `json:"message"`
+	Payload    struct {
+		Message string `json:"message"`
 	} `json:"payload"`
-
 	DebugInfo struct {
 		Message   string `json:"string"`
 		Retriable bool   `json:"retriable"`
@@ -71,36 +42,24 @@ type Error400 struct {
 	} `json:"debug_info"`
 }
 
-func (e Error400) Error() string {
-	var msg string
-	if e.Payload.Message != "" {
-		msg = e.Payload.Message
-	}
-	if e.DebugInfo.Message != "" {
-		msg = e.DebugInfo.Message
-	}
-	if e.Message != "" {
-		if msg != "" {
-			msg += "; " + e.Message
-		} else {
-			msg = e.Message
+func (e *APIError) Error() string {
+	msg := e.Message
+	for _, m := range []string{e.Payload.Message, e.DebugInfo.Message} {
+		if m != "" && m != msg {
+			msg = m + "; " + msg
 		}
 	}
-
-	if e.Code == 0 {
-		e.Code = 400
+	if e.ErrorType != "" {
+		msg += " (" + e.ErrorType + ")"
 	}
-	return fmt.Sprintf("Request Status Code %d: %s, %s", e.Code, e.Status, msg)
+	return fmt.Sprintf("%s: HTTP %d: %s", e.Endpoint, e.StatusCode, strings.TrimSuffix(msg, "; "))
 }
 
-func (e *Error400) GetMessage() string {
+func (e *APIError) kind() string {
 	if e.ErrorType != "" {
 		return e.ErrorType
 	}
-	if e.Message != "" {
-		return e.Message
-	}
-	return ""
+	return e.Message
 }
 
 type friendResp struct {
@@ -109,8 +68,6 @@ type friendResp struct {
 }
 
 type Location struct {
-	insta *Instagram
-
 	ID               Int64   `json:"pk"`
 	Name             string  `json:"name"`
 	Address          string  `json:"address"`
@@ -140,17 +97,8 @@ type Images struct {
 	Versions []Candidate `json:"candidates"`
 }
 
-func (img Images) GetBest() string {
-	best := ""
-	var mh, mw int
-	for _, v := range img.Versions {
-		if v.Width > mw || v.Height > mh {
-			best = v.URL
-			mh, mw = v.Height, v.Width
-		}
-	}
-	return best
-}
+// Best returns the URL of the largest candidate.
+func (img Images) Best() string { return bestURL(img.Versions) }
 
 type Candidate struct {
 	Width        int    `json:"width"`
@@ -161,28 +109,28 @@ type Candidate struct {
 
 type Tag struct {
 	In []struct {
-		User                  User        `json:"user"`
-		Position              []float64   `json:"position"`
-		StartTimeInVideoInSec interface{} `json:"start_time_in_video_in_sec"`
-		DurationInVideoInSec  interface{} `json:"duration_in_video_in_sec"`
+		User                  User      `json:"user"`
+		Position              []float64 `json:"position"`
+		StartTimeInVideoInSec any       `json:"start_time_in_video_in_sec"`
+		DurationInVideoInSec  any       `json:"duration_in_video_in_sec"`
 	} `json:"in"`
 }
 
 type Caption struct {
 	// can be both string or int
-	ID              interface{} `json:"pk"`
-	UserID          Int64       `json:"user_id"`
-	Text            string      `json:"text"`
-	Type            int         `json:"type"`
-	CreatedAt       Int64       `json:"created_at"`
-	CreatedAtUtc    Int64       `json:"created_at_utc"`
-	ContentType     string      `json:"content_type"`
-	Status          string      `json:"status"`
-	BitFlags        int         `json:"bit_flags"`
-	User            User        `json:"user"`
-	DidReportAsSpam bool        `json:"did_report_as_spam"`
-	MediaID         Int64       `json:"media_id"`
-	HasTranslation  bool        `json:"has_translation"`
+	ID              any    `json:"pk"`
+	UserID          Int64  `json:"user_id"`
+	Text            string `json:"text"`
+	Type            int    `json:"type"`
+	CreatedAt       Int64  `json:"created_at"`
+	CreatedAtUtc    Int64  `json:"created_at_utc"`
+	ContentType     string `json:"content_type"`
+	Status          string `json:"status"`
+	BitFlags        int    `json:"bit_flags"`
+	User            User   `json:"user"`
+	DidReportAsSpam bool   `json:"did_report_as_spam"`
+	MediaID         Int64  `json:"media_id"`
+	HasTranslation  bool   `json:"has_translation"`
 }
 
 type Mentions struct {
@@ -205,13 +153,13 @@ type Video struct {
 }
 
 type Tray struct {
-	Stories              []*Reel `json:"tray"`
+	Reels                []*Reel `json:"tray"`
 	StoryRankingToken    string  `json:"story_ranking_token"`
 	FaceFilterNuxVersion int     `json:"face_filter_nux_version"`
 	HasNewNuxStory       bool    `json:"has_new_nux_story"`
-	NuxElegible          bool    `json:"stories_viewer_gestures_nux_eligible"`
+	NuxEligible          bool    `json:"stories_viewer_gestures_nux_eligible"`
 	StickerVersion       float64 `json:"sticker_version"`
-	ReponseTS            float64 `json:"response_timestamp"`
+	ResponseTS           float64 `json:"response_timestamp"`
 	Status               string  `json:"status"`
 	EmojiReactionsConfig struct {
 		UfiType                        float64 `json:"ufi_type"`
@@ -228,8 +176,8 @@ type Tray struct {
 }
 
 func (tray *Tray) set(insta *Instagram) {
-	for i := range tray.Stories {
-		tray.Stories[i].setValues(insta)
+	for i := range tray.Reels {
+		tray.Reels[i].setValues(insta)
 	}
 }
 

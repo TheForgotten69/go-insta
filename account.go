@@ -1,7 +1,8 @@
 package goinsta
 
 import (
-	"encoding/json"
+	"context"
+	"fmt"
 )
 
 type Account struct {
@@ -60,16 +61,12 @@ type Account struct {
 	CanBoostPost               bool         `json:"can_boost_post"`
 }
 
-func (account *Account) Sync() error {
+func (account *Account) Sync(ctx context.Context) error {
 	insta := account.insta
-	body, err := insta.sendSimpleRequest(urlUserInfo, account.ID)
-	if err != nil {
-		return err
-	}
 	var resp struct {
 		User Account `json:"user"`
 	}
-	if err := json.Unmarshal(body, &resp); err != nil {
+	if err := insta.callJSON(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlUserInfo, account.ID)}, &resp); err != nil {
 		return err
 	}
 	*account = resp.User
@@ -81,8 +78,8 @@ func (account *Account) User() *User {
 	return account.insta.NewUser(int64(account.ID))
 }
 
-func (account *Account) Stories() (*StoryMedia, error) {
-	return account.insta.fetchStories(int64(account.ID))
+func (account *Account) Stories(ctx context.Context) (*Reel, error) {
+	return account.insta.fetchStories(ctx, int64(account.ID))
 }
 
 type ReelSettings struct {
@@ -95,16 +92,15 @@ type ReelSettings struct {
 	BlockedReelsCount              int    `json:"blocked_reels_count"`
 }
 
-func (account *Account) ReelSettings() (*ReelSettings, error) {
-	body, err := account.insta.sendSimpleRequest(urlReelSettings)
-	if err != nil {
+func (account *Account) ReelSettings(ctx context.Context) (*ReelSettings, error) {
+	var s ReelSettings
+	if err := account.insta.callJSON(ctx, &reqOptions{Endpoint: urlReelSettings}, &s); err != nil {
 		return nil, err
 	}
-	var s ReelSettings
-	return &s, json.Unmarshal(body, &s)
+	return &s, nil
 }
 
-func (account *Account) SetStoryAutoArchive(on bool) error {
+func (account *Account) SetStoryAutoArchive(ctx context.Context, on bool) error {
 	v := "off"
 	if on {
 		v = "on"
@@ -117,30 +113,30 @@ func (account *Account) SetStoryAutoArchive(on bool) error {
 	if err != nil {
 		return err
 	}
-	_, _, err = account.insta.sendRequest(&reqOptions{Endpoint: urlSetReelSettings, IsPost: true, Query: q})
+	_, err = account.insta.call(ctx, &reqOptions{Endpoint: urlSetReelSettings, IsPost: true, Query: q})
 	return err
 }
 
-func (account *Account) RestrictedUsers() ([]*User, error) {
-	body, err := account.insta.sendSimpleRequest(urlRestrictedUsers)
-	if err != nil {
-		return nil, err
-	}
+func (account *Account) RestrictedUsers(ctx context.Context) ([]*User, error) {
 	var resp struct {
 		Users []*User `json:"users"`
 	}
-	if err := json.Unmarshal(body, &resp); err != nil {
+	if err := account.insta.callJSON(ctx, &reqOptions{Endpoint: urlRestrictedUsers}, &resp); err != nil {
 		return nil, err
 	}
-	for _, u := range resp.Users {
-		u.insta = account.insta
-	}
-	return resp.Users, nil
+	return account.insta.usersFrom(resp.Users, entryContext{}), nil
 }
 
 // SuggestedUsers is the "Suggested for you" list (discover/ayml) on the own profile.
-func (account *Account) SuggestedUsers() ([]*User, error) {
-	body, _, err := account.insta.sendRequest(&reqOptions{
+func (account *Account) SuggestedUsers(ctx context.Context) ([]*User, error) {
+	var resp struct {
+		SuggestedUsers struct {
+			Suggestions []struct {
+				User *User `json:"user"`
+			} `json:"suggestions"`
+		} `json:"suggested_users"`
+	}
+	err := account.insta.callJSON(ctx, &reqOptions{
 		Endpoint: urlDiscoverAYML,
 		IsPost:   true,
 		Query: map[string]string{
@@ -149,18 +145,8 @@ func (account *Account) SuggestedUsers() ([]*User, error) {
 			"phone_id":               account.insta.fID,
 			"profile_chaining_check": "true",
 		},
-	})
+	}, &resp)
 	if err != nil {
-		return nil, err
-	}
-	var resp struct {
-		SuggestedUsers struct {
-			Suggestions []struct {
-				User *User `json:"user"`
-			} `json:"suggestions"`
-		} `json:"suggested_users"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, err
 	}
 	users := make([]*User, 0, len(resp.SuggestedUsers.Suggestions))

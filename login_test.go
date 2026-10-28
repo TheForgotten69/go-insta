@@ -155,7 +155,7 @@ func TestLoginFlow(t *testing.T) {
 	}
 	setTestPasswordKey(t, insta)
 
-	if err := insta.Login("bobby707880", "pw"); err != nil {
+	if err := insta.Login(t.Context(), "bobby707880", "pw"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -217,7 +217,7 @@ func TestLoginFlow(t *testing.T) {
 
 func TestLoginNeedsPasswordKey(t *testing.T) {
 	insta, _ := newLoggedOut(t)
-	if err := insta.Login("bobby707880", "pw"); err != ErrPasswordKeyUnknown {
+	if err := insta.Login(t.Context(), "bobby707880", "pw"); err != ErrPasswordKeyUnknown {
 		t.Errorf("err = %v, want ErrPasswordKeyUnknown", err)
 	}
 }
@@ -239,5 +239,42 @@ func TestPasswordKeyCapturedFromHeaders(t *testing.T) {
 	insta.extractHeaders(h)
 	if s := insta.Session(); s.PasswordPubKey != "cGVt" || s.PasswordKeyID != "181" {
 		t.Errorf("password key not captured: %q %q", s.PasswordPubKey, s.PasswordKeyID)
+	}
+}
+
+func TestReloginUsesLoggedOutProfile(t *testing.T) {
+	insta, err := New(Session{
+		UserID: 42865264907, Authorization: "Bearer IGT:2:old", Rur: "rur", WWWClaim: "claim",
+		AndroidID: "android-0000000000000000", DeviceID: "00000000-0000-0000-0000-00000000dev0",
+		FamilyDeviceID: "00000000-0000-0000-0000-00000000fam0", Mid: "mid", ZCA: "zca", USDID: "usdid",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &loginServer{t: t, reqs: map[string]*http.Request{}, form: map[string]url.Values{}}
+	insta.SetHTTPClient(&http.Client{Transport: srv})
+	setTestPasswordKey(t, insta)
+
+	if err := insta.Login(t.Context(), "bobby707880", "pw"); err != nil {
+		t.Fatal(err)
+	}
+	for name, r := range srv.reqs {
+		for _, h := range []string{"Authorization", "Ig-U-Ds-User-Id", "Ig-U-Rur", "X-Meta-Usdid"} {
+			if v := r.Header.Get(h); v != "" {
+				t.Errorf("%s sent %s: %q", name, h, v)
+			}
+		}
+		if r.Header.Get("Ig-Intended-User-Id") != "0" || r.Header.Get("X-Mid") != "mid" {
+			t.Errorf("%s: intended id %q, mid %q", name, r.Header.Get("Ig-Intended-User-Id"), r.Header.Get("X-Mid"))
+		}
+	}
+	if s := insta.Session(); s.ZCA != "zca" || s.USDID != "usdid" || s.Authorization != "Bearer IGT:2:abc" {
+		t.Errorf("after login: zca %q usdid %q auth %q", s.ZCA, s.USDID, s.Authorization)
+	}
+	insta.mu.Lock()
+	cur := insta.curAtt
+	insta.mu.Unlock()
+	if cur != nil {
+		t.Error("throwaway login key still signing")
 	}
 }

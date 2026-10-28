@@ -1,6 +1,7 @@
 package goinsta
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -18,10 +19,10 @@ var (
 	entrySuggested = entryContext{"suggested_users", "feed_timeline"}
 )
 
-func (insta *Instagram) usersFrom(users []*User, ctx entryContext) []*User {
+func (insta *Instagram) usersFrom(users []*User, entry entryContext) []*User {
 	for _, u := range users {
 		u.insta = insta
-		u.entry = ctx
+		u.entry = entry
 	}
 	return users
 }
@@ -34,9 +35,15 @@ type SearchResult struct {
 }
 
 // SearchUsers is the "Accounts" tab of the search results page.
-func (insta *Instagram) SearchUsers(query string) (*SearchResult, error) {
+func (insta *Instagram) SearchUsers(ctx context.Context, query string) (*SearchResult, error) {
 	serpSession := generateUUID()
-	body, _, err := insta.sendRequest(&reqOptions{
+	var resp struct {
+		Users     []*User `json:"users"`
+		HasMore   bool    `json:"has_more"`
+		RankToken string  `json:"rank_token"`
+		PageToken string  `json:"page_token"`
+	}
+	err := insta.callJSON(ctx, &reqOptions{
 		Endpoint: urlAccountSerp,
 		Query: map[string]string{
 			"search_surface":  "user_serp",
@@ -53,17 +60,8 @@ func (insta *Instagram) SearchUsers(query string) (*SearchResult, error) {
 			"count":             "30",
 			"query":             query,
 		},
-	})
+	}, &resp)
 	if err != nil {
-		return nil, err
-	}
-	var resp struct {
-		Users     []*User `json:"users"`
-		HasMore   bool    `json:"has_more"`
-		RankToken string  `json:"rank_token"`
-		PageToken string  `json:"page_token"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, err
 	}
 	return &SearchResult{
@@ -72,12 +70,6 @@ func (insta *Instagram) SearchUsers(query string) (*SearchResult, error) {
 		RankToken: resp.RankToken,
 		PageToken: resp.PageToken,
 	}, nil
-}
-
-type FollowList struct {
-	Users     []*User
-	HasMore   bool
-	NextMaxID string
 }
 
 // gqlUser is the XDTUserDict shape: id instead of pk, aliased fields.
@@ -93,10 +85,17 @@ type gqlUser struct {
 	Friendship      Friendship `json:"friendship_status"`
 }
 
-// Followers returns one page; pass "" then NextMaxID.
-func (user *User) Followers(maxID string) (*FollowList, error) {
-	vars := map[string]any{
-		"user_id":                          user.ID.String(),
+func (user *User) Followers() *Pager[*User] {
+	return user.followList("FollowersList", docFollowersList, "xdt_api__v1__friendships__followers", entryFollowers, followersVars)
+}
+
+func (user *User) Following() *Pager[*User] {
+	return user.followList("FollowingList", docFollowingList, "xdt_api__v1__friendships__following", entryFollowing, followingVars)
+}
+
+func followersVars(id Int64) map[string]any {
+	return map[string]any{
+		"user_id":                          id.String(),
 		"skip_suggested_users":             false,
 		"skip_more_groups_available":       false,
 		"skip_friendship_followers_fields": true,
@@ -109,14 +108,9 @@ func (user *User) Followers(maxID string) (*FollowList, error) {
 		"skip_big_list":                    false,
 		"include_unseen_count":             true,
 	}
-	if maxID != "" {
-		vars["max_id"] = maxID
-	}
-	return user.followList("FollowersList", docFollowersList, "xdt_api__v1__friendships__followers", vars, entryFollowers)
 }
 
-// Following returns one page; pass "" then NextMaxID.
-func (user *User) Following(maxID string) (*FollowList, error) {
+func followingVars(id Int64) map[string]any {
 	requestData := map[string]any{"rank_token": "", "supported_capabilities_new": []any{},
 		"includes_hashtags": true, "search_surface": "follow_list_page"}
 	for _, k := range []string{"username", "support_new_api", "absolute_url_processed", "phone_id", "target_id",
@@ -125,8 +119,8 @@ func (user *User) Following(maxID string) (*FollowList, error) {
 		"_uuid", "_uid", "_csrftoken"} {
 		requestData[k] = nil
 	}
-	vars := map[string]any{
-		"user_id":                             user.ID.String(),
+	return map[string]any{
+		"user_id":                             id.String(),
 		"skip_use_clickable_see_more":         false,
 		"skip_preview_hashtags":               false,
 		"skip_should_limit_list_of_followers": false,
@@ -145,59 +139,65 @@ func (user *User) Following(maxID string) (*FollowList, error) {
 		"enable_groups":                       true,
 		"skip_hashtag_count":                  false,
 	}
-	if maxID != "" {
-		vars["max_id"] = maxID
-	}
-	return user.followList("FollowingList", docFollowingList, "xdt_api__v1__friendships__following", vars, entryFollowing)
 }
 
 // The response carries a non-fatal "execution error" in errors[] next to valid data.
-func (user *User) followList(friendly, doc, root string, vars map[string]any, ctx entryContext) (*FollowList, error) {
+func (user *User) followList(friendly, doc, root string, entry entryContext, varsFor func(Int64) map[string]any) *Pager[*User] {
 	insta := user.insta
-	body, err := insta.graphQL(friendly, doc, root, "", vars)
-	if err != nil {
-		return nil, err
-	}
-	var resp struct {
-		Data map[string]json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, err
-	}
-	raw, ok := rootField(resp.Data, root)
-	if !ok || string(raw) == "null" {
-		return nil, fmt.Errorf("%s: %w", friendly, ErrEmptyResponse)
-	}
-	var list struct {
-		Users     []gqlUser `json:"users"`
-		HasMore   bool      `json:"has_more"`
-		NextMaxID *string   `json:"next_max_id"`
-	}
-	if err := json.Unmarshal(raw, &list); err != nil {
-		return nil, err
-	}
-	out := &FollowList{HasMore: list.HasMore}
-	if list.NextMaxID != nil {
-		out.NextMaxID = *list.NextMaxID
-	}
-	for _, g := range list.Users {
-		out.Users = append(out.Users, &User{
-			ID: g.ID, Username: g.Username, FullName: g.FullName, IsPrivate: g.IsPrivate,
-			IsVerified: g.IsVerified, ProfilePicID: g.ProfilePicID, ProfilePicURL: g.ProfilePicURL,
-			LatestReelMedia: g.LatestReelMedia, Friendship: g.Friendship,
-		})
-	}
-	insta.usersFrom(out.Users, ctx)
-	return out, nil
+	var maxID string
+	return newPager(func(ctx context.Context) ([]*User, bool, error) {
+		vars := varsFor(user.ID)
+		if maxID != "" {
+			vars["max_id"] = maxID
+		}
+		body, err := insta.graphQL(ctx, friendly, doc, root, "", vars)
+		if err != nil {
+			return nil, false, err
+		}
+		var resp struct {
+			Data map[string]json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(body, &resp); err != nil {
+			return nil, false, err
+		}
+		raw, ok := rootField(resp.Data, root)
+		if !ok || string(raw) == "null" {
+			return nil, false, fmt.Errorf("%s: %w", friendly, ErrEmptyResponse)
+		}
+		var list struct {
+			Users     []gqlUser `json:"users"`
+			HasMore   bool      `json:"has_more"`
+			NextMaxID *string   `json:"next_max_id"`
+		}
+		if err := json.Unmarshal(raw, &list); err != nil {
+			return nil, false, err
+		}
+		maxID = ""
+		if list.NextMaxID != nil {
+			maxID = *list.NextMaxID
+		}
+		users := make([]*User, len(list.Users))
+		for i, g := range list.Users {
+			users[i] = &User{
+				ID: g.ID, Username: g.Username, FullName: g.FullName, IsPrivate: g.IsPrivate,
+				IsVerified: g.IsVerified, ProfilePicID: g.ProfilePicID, ProfilePicURL: g.ProfilePicURL,
+				LatestReelMedia: g.LatestReelMedia, Friendship: g.Friendship,
+			}
+		}
+		return insta.usersFrom(users, entry), list.HasMore && maxID != "", nil
+	})
 }
 
 // Friendships returns the friendship status for each user id (friendships/show_many).
-func (insta *Instagram) Friendships(ids ...int64) (map[string]Friendship, error) {
+func (insta *Instagram) Friendships(ctx context.Context, ids ...int64) (map[string]Friendship, error) {
 	s := make([]string, len(ids))
 	for i, id := range ids {
 		s[i] = Int64(id).String()
 	}
-	body, _, err := insta.sendRequest(&reqOptions{
+	var resp struct {
+		Statuses map[string]Friendship `json:"friendship_statuses"`
+	}
+	err := insta.callJSON(ctx, &reqOptions{
 		Endpoint: urlFriendshipShowMany,
 		IsPost:   true,
 		Query: map[string]string{
@@ -205,12 +205,9 @@ func (insta *Instagram) Friendships(ids ...int64) (map[string]Friendship, error)
 			"include_followed_by": "false",
 			"user_ids":            strings.Join(s, ", "),
 		},
-	})
+	}, &resp)
 	if err != nil {
 		return nil, err
 	}
-	var resp struct {
-		Statuses map[string]Friendship `json:"friendship_statuses"`
-	}
-	return resp.Statuses, json.Unmarshal(body, &resp)
+	return resp.Statuses, nil
 }

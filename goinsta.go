@@ -1,12 +1,16 @@
 package goinsta
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	neturl "net/url"
 	"os"
+	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go-insta/internal/httplog"
@@ -15,44 +19,45 @@ import (
 // Session: generate with `httplog session log_http.txt > session.json`.
 type Session = httplog.Session
 
+// Instagram is safe for concurrent use once configured: call the Set* methods
+// (except SetProxy/UnsetProxy/SetHTTPClient, which may run at any time) before
+// sharing it. Login swaps the client into the logged-out profile, so do not run
+// other requests while it is in flight. Pagers (Timeline, Posts, ...) and the
+// Account struct belong to one goroutine each.
 type Instagram struct {
-	dID       string // android-<16 hex>
-	uuid      string
-	fID       string
-	psID      string // UFS-<uuid>-0
-	net       netSession
-	userAgent string
-	sess      Session
+	dID  string // android-<16 hex>
+	uuid string
+	fID  string
+	psID string // UFS-<uuid>-0
+	sess Session
 
+	net           netSession
+	bw            bandwidth
+	baseHeader    http.Header // static per client; cloned per request
+	feedSessionID string
+
+	uid           atomic.Int64
+	c             atomic.Pointer[http.Client]
 	headerOptions sync.Map
 
-	mu       sync.Mutex
-	pwPubKey string // base64 of a PEM RSA key, from ig-set-password-encryption-pub-key
-	pwKeyID  string
-
+	mu          sync.Mutex
+	pwPubKey    string // base64 of a PEM RSA key, from ig-set-password-encryption-pub-key
+	pwKeyID     string
 	att         *Attestation // registered keys, restored after the logged-out login flow
-	curAtt      *Attestation // the one currently signing headers (guarded by mu)
+	curAtt      *Attestation // the one currently signing headers
 	attSignedAt time.Time
 
-	Timeline    *Timeline
-	Account     *Account
-	Collections *Collections
-	Activity    *Activity
+	Account *Account
 
-	c *http.Client
-
-	Debug bool
-
-	infoHandler  func(...interface{})
-	warnHandler  func(...interface{})
-	debugHandler func(...interface{})
-
-	reqWrapper ReqWrapper
+	// Logger receives rate-limit warnings and, at debug level, every response
+	// body. It defaults to slog.Default().
+	Logger *slog.Logger
+	// RateLimitWait is how long a 429 is waited out before retrying (up to 3
+	// times); 0 returns ErrTooManyRequests at once.
+	RateLimitWait time.Duration
 }
 
-func defaultHandler(args ...interface{}) {
-	fmt.Println(args...)
-}
+const DefaultRateLimitWait = 8 * time.Minute
 
 func New(s Session) (*Instagram, error) {
 	// A logged-out session (device fields, no token) is valid for Login; a session
@@ -63,8 +68,11 @@ func New(s Session) (*Instagram, error) {
 	if s.Authorization != "" && s.UserID == 0 {
 		return nil, ErrSessionInvalid
 	}
+	if s.Locale == "" {
+		s.Locale = locale
+	}
 	if s.UserAgent == "" {
-		s.UserAgent = createUserAgent(Waydroid)
+		s.UserAgent = createUserAgent(Waydroid, s.Locale)
 	}
 	if s.BloksVersionID == "" {
 		s.BloksVersionID = bloksVerID
@@ -74,9 +82,6 @@ func New(s Session) (*Instagram, error) {
 	}
 	if s.Capabilities == "" {
 		s.Capabilities = igCapabilities
-	}
-	if s.Locale == "" {
-		s.Locale = locale
 	}
 	if s.TimezoneOffset == "" {
 		s.TimezoneOffset = timeOffset
@@ -95,20 +100,21 @@ func New(s Session) (*Instagram, error) {
 	}
 
 	insta := &Instagram{
-		dID:          s.AndroidID,
-		uuid:         s.DeviceID,
-		fID:          s.FamilyDeviceID,
-		psID:         s.PigeonSession,
-		net:          newNetSession(),
-		userAgent:    s.UserAgent,
-		sess:         s,
-		c:            &http.Client{Transport: directTransport()},
-		infoHandler:  defaultHandler,
-		warnHandler:  defaultHandler,
-		debugHandler: defaultHandler,
-		reqWrapper:   DefaultWrapper(),
-		Debug:        os.Getenv("GOINSTA_DEBUG") != "",
+		dID:           s.AndroidID,
+		uuid:          s.DeviceID,
+		fID:           s.FamilyDeviceID,
+		psID:          s.PigeonSession,
+		sess:          s,
+		net:           newNetSession(),
+		feedSessionID: generateUUID(),
+		pwPubKey:      s.PasswordPubKey,
+		pwKeyID:       s.PasswordKeyID,
+		RateLimitWait: DefaultRateLimitWait,
+		Logger:        slog.Default(),
 	}
+	insta.baseHeader = insta.staticHeaders()
+	insta.uid.Store(s.UserID)
+	insta.c.Store(&http.Client{Transport: directTransport()})
 	for k, v := range map[string]string{
 		"Authorization":  s.Authorization,
 		"X-Mid":          s.Mid,
@@ -121,11 +127,16 @@ func New(s Session) (*Instagram, error) {
 			insta.headerOptions.Store(k, v)
 		}
 	}
-	insta.pwPubKey, insta.pwKeyID = s.PasswordPubKey, s.PasswordKeyID
 	insta.Account = &Account{insta: insta, ID: Int64(s.UserID)}
-	insta.Timeline = newTimeline(insta)
-	insta.Collections = newCollections(insta)
-	insta.Activity = newActivity(insta)
+	if s.Attestation != nil {
+		a, err := NewAttestation(*s.Attestation)
+		if err != nil {
+			return nil, fmt.Errorf("session attestation: %w", err)
+		}
+		if err := insta.SetAttestation(a); err != nil {
+			return nil, err
+		}
+	}
 	return insta, nil
 }
 
@@ -141,36 +152,49 @@ func ImportSession(path string) (*Instagram, error) {
 	return New(s)
 }
 
+func (insta *Instagram) header(k string) string {
+	if v, ok := insta.headerOptions.Load(k); ok {
+		return v.(string)
+	}
+	return ""
+}
+
 func (insta *Instagram) Session() Session {
 	s := insta.sess
-	get := func(k string) string {
-		if v, ok := insta.headerOptions.Load(k); ok {
-			return v.(string)
-		}
-		return ""
-	}
-	s.Authorization = get("Authorization")
-	s.Mid = get("X-Mid")
-	s.WWWClaim = get("X-Ig-Www-Claim")
-	s.Rur = get("Ig-U-Rur")
+	s.UserID = insta.userID()
+	s.Authorization = insta.header("Authorization")
+	s.Mid = insta.header("X-Mid")
+	s.WWWClaim = insta.header("X-Ig-Www-Claim")
+	s.Rur = insta.header("Ig-U-Rur")
+	s.ZCA = insta.header("X-Meta-Zca")
+	s.USDID = insta.header("X-Meta-Usdid")
 	insta.mu.Lock()
 	s.PasswordPubKey, s.PasswordKeyID = insta.pwPubKey, insta.pwKeyID
+	if insta.att != nil {
+		cfg := insta.att.cfg
+		s.Attestation = &cfg
+	}
 	insta.mu.Unlock()
 	return s
 }
 
+// ExportSession writes the session (with the attestation private keys) mode 0600.
 func (insta *Instagram) ExportSession(path string) error {
 	b, err := json.MarshalIndent(insta.Session(), "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, b, 0o600); err != nil {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
-	return os.Chmod(path, 0o600) // WriteFile keeps the mode of an existing file
+	if err := os.Chmod(tmp, 0o600); err != nil { // WriteFile keeps the mode of an existing file
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
-func (insta *Instagram) userID() int64 { return int64(insta.Account.ID) }
+func (insta *Instagram) userID() int64 { return insta.uid.Load() }
 
 // LogoutResult carries the one-tap re-login nonces the server returns on logout.
 type LogoutResult struct {
@@ -182,8 +206,9 @@ type LogoutResult struct {
 
 // Logout ends the session server-side. The session's token is invalid afterward;
 // the returned nonce allows a later one-tap re-login from the same device.
-func (insta *Instagram) Logout() (*LogoutResult, error) {
-	body, _, err := insta.sendRequest(&reqOptions{
+func (insta *Instagram) Logout(ctx context.Context) (*LogoutResult, error) {
+	var r LogoutResult
+	err := insta.callJSON(ctx, &reqOptions{
 		Endpoint: urlLogout,
 		IsPost:   true,
 		Query: map[string]string{
@@ -196,24 +221,43 @@ func (insta *Instagram) Logout() (*LogoutResult, error) {
 			"phone_id":                      insta.fID,
 			"prevent_remove_device_from_wa": "true",
 		},
-	})
+	}, &r)
 	if err != nil {
 		return nil, err
 	}
-	var r LogoutResult
-	return &r, json.Unmarshal(body, &r)
+	return &r, nil
 }
 
-func (insta *Instagram) SetInfoHandler(f func(...interface{}))  { insta.infoHandler = f }
-func (insta *Instagram) SetWarnHandler(f func(...interface{}))  { insta.warnHandler = f }
-func (insta *Instagram) SetDebugHandler(f func(...interface{})) { insta.debugHandler = f }
-func (insta *Instagram) SetWrapper(fn ReqWrapper)               { insta.reqWrapper = fn }
+func (insta *Instagram) client() *http.Client { return insta.c.Load() }
 
-func (insta *Instagram) SetHTTPClient(client *http.Client) { insta.c = client }
+func (insta *Instagram) swapClient(c *http.Client) {
+	old := insta.c.Swap(c)
+	if old == nil || sameTransport(old.Transport, c.Transport) {
+		return
+	}
+	if ci, ok := old.Transport.(interface{ CloseIdleConnections() }); ok {
+		ci.CloseIdleConnections()
+	}
+}
 
-func (insta *Instagram) SetHTTPTransport(transport http.RoundTripper) { insta.c.Transport = transport }
+func sameTransport(a, b http.RoundTripper) bool {
+	ta := reflect.TypeOf(a)
+	if ta != reflect.TypeOf(b) || ta == nil || !ta.Comparable() {
+		return ta == nil && b == nil
+	}
+	return a == b
+}
 
-func (insta *Instagram) SetTimeout(t time.Duration) { insta.c.Timeout = t }
+// SetHTTPClient replaces the client wholesale. Its transport does not present
+// the app's TLS fingerprint unless it came from SetProxy; logins from other
+// fingerprints get 429. Meant for tests and custom round trippers.
+func (insta *Instagram) SetHTTPClient(client *http.Client) { insta.swapClient(client) }
+
+func (insta *Instagram) SetTimeout(t time.Duration) {
+	c := *insta.client()
+	c.Timeout = t
+	insta.swapClient(&c)
+}
 
 // SetProxy routes requests through an http:// (CONNECT) or socks5:// proxy while
 // keeping the app's TLS fingerprint. insecure skips certificate verification,
@@ -227,12 +271,16 @@ func (insta *Instagram) SetProxy(rawURL string, insecure bool) error {
 	if err != nil {
 		return err
 	}
-	insta.c.Transport = t
+	c := *insta.client()
+	c.Transport = t
+	insta.swapClient(&c)
 	return nil
 }
 
 func (insta *Instagram) UnsetProxy() {
-	insta.c.Transport = directTransport()
+	c := *insta.client()
+	c.Transport = directTransport()
+	insta.swapClient(&c)
 }
 
 // directTransport is the app-fingerprinted transport without a proxy.
@@ -241,7 +289,6 @@ func directTransport() http.RoundTripper {
 	return t
 }
 
-func (insta *Instagram) GetAccountFamily() ([]byte, error) {
-	body, _, err := insta.sendRequest(&reqOptions{Endpoint: urlGetAccFamily})
-	return body, err
+func (insta *Instagram) AccountFamily(ctx context.Context) ([]byte, error) {
+	return insta.call(ctx, &reqOptions{Endpoint: urlGetAccFamily})
 }

@@ -5,10 +5,10 @@ import "errors"
 const (
 	// The current build (captures from 2026-10-28) sends logged-in REST, GraphQL and
 	// uploads to i.instagram.com; only cold-start calls still use b.i.instagram.com.
-	baseUrl       = "https://i.instagram.com/"
-	graphQLUrl    = "https://i.instagram.com/graphql/query"
-	instaAPIUrl   = "https://i.instagram.com/api/v1/"
-	instaAPIUrlv2 = "https://i.instagram.com/api/v2/"
+	baseURL    = "https://i.instagram.com/"
+	graphQLURL = "https://i.instagram.com/graphql/query"
+	apiURL     = "https://i.instagram.com/api/v1/"
+	apiV2URL   = "https://i.instagram.com/api/v2/"
 
 	// Values captured from Instagram for Android 453.0.0.55.79.
 	appVersion     = "453.0.0.55.79"
@@ -86,7 +86,7 @@ const (
 
 	urlCreateNote = "media/create_note/v2/"
 
-	urlUploadPhoto      = "rupload_igphoto/%s" // relative to baseUrl
+	urlUploadPhoto      = "rupload_igphoto/%s" // relative to baseURL
 	urlConfigure        = "media/configure/"
 	urlConfigureSidecar = "media/configure_sidecar/"
 	urlConfigureStory   = "media/configure_to_story/"
@@ -102,11 +102,10 @@ var (
 	ErrSessionInvalid     = errors.New("session is missing authorization or user id")
 
 	ErrInvalidImage       = errors.New("invalid file type, please use a jpeg or webp image")
-	ErrCarouselMediaLimit = errors.New("carousel media limit of 10 exceeded")
+	ErrCarouselMediaLimit = errors.New("an album takes 2 to 10 photos")
 
-	ErrNoMore          = errors.New("no more posts available, page end has been reached")
-	ErrMediaDeleted    = errors.New("sorry, this media has been deleted")
-	ErrNoMedia         = errors.New("failed to download, no media found")
-	ErrInstaNotDefined = errors.New("insta has not been defined")
-	ErrEmptyResponse   = errors.New("empty response body")
+	ErrNoMore        = errors.New("no more posts available, page end has been reached")
+	ErrMediaDeleted  = errors.New("sorry, this media has been deleted")
+	ErrNoMedia       = errors.New("failed to download, no media found")
+	ErrEmptyResponse = errors.New("empty response body")
 )

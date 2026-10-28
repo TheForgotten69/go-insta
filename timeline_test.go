@@ -20,15 +20,15 @@ func TestTimelineParsesWrappedItems(t *testing.T) {
 	insta, _ := newReplay(t)
 	insta.SetHTTPClient(&http.Client{Transport: staticBody(`{"feed_items":[ {"media_or_ad":{"id":"1_1","pk":1}}, {"explore_story":{"id":2,"source":"feed_recs","media_or_ad":{"id":"2_2","pk":2}}}, {"end_of_feed_demarcator":{"title":"done"}} ],"more_available":true,"next_max_id":"abc","status":"ok"}`)})
 
-	if !insta.Timeline.Next() {
-		t.Fatal(insta.Timeline.Error())
+	tl := insta.Timeline()
+	if err := tl.Next(t.Context()); err != nil {
+		t.Fatal(err)
 	}
-	tl := insta.Timeline
 	if len(tl.Items) != 2 || tl.Items[0].ID != "1_1" || tl.Items[1].ID != "2_2" {
 		t.Fatalf("items = %+v", tl.Items)
 	}
-	if tl.Items[1].Index != 1 || !tl.MoreAvailable || tl.NextID != "abc" {
-		t.Errorf("paging state wrong: index=%d more=%v next=%q", tl.Items[1].Index, tl.MoreAvailable, tl.NextID)
+	if tl.Items[1].Index != 1 || !tl.More() || tl.nextID != "abc" {
+		t.Errorf("paging state wrong: index=%d more=%v next=%q", tl.Items[1].Index, tl.More(), tl.nextID)
 	}
 }
 
@@ -47,7 +47,7 @@ func TestCurrentBuildProfile(t *testing.T) {
 	insta, _ := newReplay(t)
 	rec := &recorder{}
 	insta.SetHTTPClient(&http.Client{Transport: rec})
-	if _, err := insta.Account.ReelSettings(); err != nil {
+	if _, err := insta.Account.ReelSettings(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	h := rec.last.Header

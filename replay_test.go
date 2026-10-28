@@ -3,6 +3,7 @@ package goinsta
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"image"
@@ -59,6 +60,7 @@ type sent struct {
 }
 
 type replay struct {
+	mu       sync.Mutex
 	t        *testing.T
 	fixtures []httplog.Entry
 	used     []bool
@@ -66,6 +68,8 @@ type replay struct {
 }
 
 func (r *replay) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	var raw []byte
 	if req.Body != nil {
 		raw, _ = io.ReadAll(req.Body)
@@ -310,7 +314,7 @@ func testItem(insta *Instagram, id string) *Item {
 
 func TestTimeline(t *testing.T) {
 	insta, r := newReplay(t, "timeline")
-	insta.Timeline.Next()
+	_ = insta.Timeline().Next(t.Context())
 	checkRequest(t, fixture(t, "timeline"), r.sent[0])
 	if r.sent[0].req.Header.Get("Content-Encoding") != "gzip" {
 		t.Error("timeline body must be gzipped")
@@ -320,14 +324,15 @@ func TestTimeline(t *testing.T) {
 func TestTimelineTail(t *testing.T) {
 	insta, r := newReplay(t, "timeline_tail")
 	f := fixture(t, "timeline_tail")
-	insta.Timeline.started, insta.Timeline.MoreAvailable, insta.Timeline.NextID = true, true, f.ReqForm["max_id"]
-	insta.Timeline.Next()
+	tl := insta.Timeline()
+	tl.started, tl.nextID = true, f.ReqForm["max_id"]
+	_ = tl.Next(t.Context())
 	checkRequest(t, f, r.sent[0], "client_view_state_media_list", "feed_view_info")
 }
 
 func TestReelsTray(t *testing.T) {
 	insta, r := newReplay(t, "reels_tray")
-	if err := insta.Timeline.FetchTray("pull_to_refresh"); err != nil {
+	if _, err := insta.StoryTray(t.Context(), TrayPullToRefresh); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "reels_tray"), r.sent[0])
@@ -335,7 +340,7 @@ func TestReelsTray(t *testing.T) {
 
 func TestLogout(t *testing.T) {
 	insta, r := newReplay(t, "logout")
-	res, err := insta.Logout()
+	res, err := insta.Logout(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +363,7 @@ func TestLogout(t *testing.T) {
 
 func TestAccountSync(t *testing.T) {
 	insta, r := newReplay(t, "user_info")
-	if err := insta.Account.Sync(); err != nil {
+	if err := insta.Account.Sync(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "user_info"), r.sent[0])
@@ -369,7 +374,7 @@ func TestAccountSync(t *testing.T) {
 
 func TestUserInfoStream(t *testing.T) {
 	insta, r := newReplay(t, "user_info_stream")
-	u, err := insta.UserByID(62759345752)
+	u, err := insta.UserByID(t.Context(), 62759345752)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,16 +391,16 @@ func TestFriendship(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		id   int64
-		call func(*User) error
+		call func(*User, context.Context) error
 	}{
-		{"friendship_show", 62759345752, func(u *User) error { _, err := u.GetFriendship(); return err }},
+		{"friendship_show", 62759345752, func(u *User, ctx context.Context) error { _, err := u.LoadFriendship(ctx); return err }},
 		{"follow", 62759345752, (*User).Follow},
 		{"unfollow", 27626942043, (*User).Unfollow},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			insta, r := newReplay(t, tc.name)
 			u := insta.NewUser(tc.id)
-			if err := tc.call(u); err != nil {
+			if err := tc.call(u, t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			checkRequest(t, fixture(t, tc.name), r.sent[0])
@@ -406,11 +411,11 @@ func TestFriendship(t *testing.T) {
 func TestStoriesAndHighlights(t *testing.T) {
 	insta, r := newReplay(t, "user_story", "highlights_tray")
 	u := insta.NewUser(62759345752)
-	if _, err := u.Stories(); err != nil {
+	if _, err := u.Stories(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "user_story"), r.sent[0])
-	hl, err := u.Highlights()
+	hl, err := u.Highlights(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +427,7 @@ func TestStoriesAndHighlights(t *testing.T) {
 
 func TestReelsMediaStream(t *testing.T) {
 	insta, r := newReplay(t, "reels_media_stream")
-	_, _ = insta.FetchReels("highlight:18094052522158448")
+	_, _ = insta.FetchReels(t.Context(), "highlight:18094052522158448")
 	checkRequest(t, fixture(t, "reels_media_stream"), r.sent[0])
 }
 
@@ -431,14 +436,14 @@ func TestStorySeenAndLike(t *testing.T) {
 	reel := &Reel{insta: insta, ID: json.RawMessage(`"highlight:18094052522158448"`)}
 	it := testItem(insta, "3989118560685351393_62759345752")
 	it.TakenAt = 1789760010
-	if err := reel.MarkSeen(it); err != nil {
+	if err := reel.MarkSeen(t.Context(), it); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "media_seen"), r.sent[0])
 	if q := r.sent[0].req.URL.RawQuery; q != "reel=1&live_vod=0" {
 		t.Errorf("seen query = %q", q)
 	}
-	if err := it.LikeStory(); err != nil {
+	if err := it.LikeStory(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "story_like"), r.sent[1])
@@ -452,7 +457,7 @@ func TestSuggestions(t *testing.T) {
 	if id := f.Query["target_id"]; id != "62759345752" {
 		u.ID = Int64(mustInt(t, id))
 	}
-	users, err := u.SuggestedUsers()
+	users, err := u.SuggestedUsers(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,11 +465,11 @@ func TestSuggestions(t *testing.T) {
 	if len(users) == 0 {
 		t.Error("no chaining users")
 	}
-	if _, err := insta.Account.SuggestedUsers(); err != nil {
+	if _, err := insta.Account.SuggestedUsers(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "ayml"), r.sent[1])
-	if _, err := insta.Account.RestrictedUsers(); err != nil {
+	if _, err := insta.Account.RestrictedUsers(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "restricted_users"), r.sent[2])
@@ -472,7 +477,7 @@ func TestSuggestions(t *testing.T) {
 
 func TestReelSettings(t *testing.T) {
 	insta, r := newReplay(t, "reel_settings", "set_reel_settings")
-	s, err := insta.Account.ReelSettings()
+	s, err := insta.Account.ReelSettings(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -480,7 +485,7 @@ func TestReelSettings(t *testing.T) {
 	if s.ReelAutoArchive == "" {
 		t.Error("reel settings not parsed")
 	}
-	if err := insta.Account.SetStoryAutoArchive(true); err != nil {
+	if err := insta.Account.SetStoryAutoArchive(t.Context(), true); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "set_reel_settings"), r.sent[1])
@@ -490,20 +495,20 @@ func TestMediaInteractions(t *testing.T) {
 	insta, r := newReplay(t, "like", "save", "stream_comments", "create_note")
 	it := testItem(insta, "4017333050152331980_8663171404")
 
-	if err := it.Like(); err != nil {
+	if err := it.Like(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "like"), r.sent[0], "is_from_swipe")
 
-	if err := it.Save(); err != nil {
+	if err := it.Save(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "save"), r.sent[1])
 
 	sc := fixture(t, "stream_comments")
 	scItem := testItem(insta, strings.Split(sc.Path, "/")[4])
-	cs, err := scItem.Comments()
-	if err != nil {
+	cs := scItem.Comments()
+	if err := cs.Next(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, sc, r.sent[2])
@@ -511,7 +516,7 @@ func TestMediaInteractions(t *testing.T) {
 		t.Error("comments not parsed")
 	}
 
-	if _, err := it.AddNote(""); err != nil {
+	if _, err := it.AddNote(t.Context(), ""); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "create_note"), r.sent[3])
@@ -522,7 +527,7 @@ func TestComment(t *testing.T) {
 	insta, r := newReplay(t, "comment")
 	it := testItem(insta, strings.Split(f.Path, "/")[4])
 	text := f.ReqSigned["comment_text"].(string)
-	c, err := it.Comment(text)
+	c, err := it.Comment(t.Context(), text)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -556,18 +561,19 @@ func TestCommentThreads(t *testing.T) {
 	insta, r := newReplay(t, "stream_comments_page", "inline_child_comments", "comment_like", "comment_unlike", "comment_bulk_delete")
 	page := fixture(t, "stream_comments_page")
 	it := testItem(insta, strings.Split(page.Path, "/")[4])
-	cs := &Comments{item: it, HasMoreHeadloadComments: true, NextMinID: page.Query["min_id"]}
-	if err := cs.Next(); err != nil {
+	cs := it.Comments()
+	cs.minID = page.Query["min_id"]
+	if err := cs.Next(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, page, r.sent[0])
-	if len(cs.Items) == 0 || cs.item != it {
+	if len(cs.Items) == 0 || cs.Items[0].item != it {
 		t.Errorf("page not parsed: %d", len(cs.Items))
 	}
 
 	child := fixture(t, "inline_child_comments")
 	parent := &Comment{ID: json.Number(strings.Split(child.Path, "/")[6]), item: it}
-	replies, err := parent.Replies()
+	replies, err := parent.Replies(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -578,18 +584,18 @@ func TestCommentThreads(t *testing.T) {
 
 	like := fixture(t, "comment_like")
 	cm := &Comment{ID: json.Number(strings.Split(like.Path, "/")[4]), item: it}
-	if err := cm.Like(); err != nil {
+	if err := cm.Like(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, like, r.sent[2])
-	if err := cm.Unlike(); err != nil {
+	if err := cm.Unlike(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "comment_unlike"), r.sent[3])
 
 	del := fixture(t, "comment_bulk_delete")
 	own := testItem(insta, strings.Split(del.Path, "/")[4])
-	if err := own.DeleteComments(del.ReqSigned["comment_ids_to_delete"].(string)); err != nil {
+	if err := own.DeleteComments(t.Context(), del.ReqSigned["comment_ids_to_delete"].(string)); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, del, r.sent[4])
@@ -601,7 +607,7 @@ func TestCommentThreads(t *testing.T) {
 func TestOwnMediaActions(t *testing.T) {
 	insta, r := newReplay(t, "media_delete", "media_only_me", "pin_timeline_media")
 	del := fixture(t, "media_delete")
-	if err := testItem(insta, strings.Split(del.Path, "/")[4]).Delete(); err != nil {
+	if err := testItem(insta, strings.Split(del.Path, "/")[4]).Delete(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, del, r.sent[0])
@@ -609,13 +615,13 @@ func TestOwnMediaActions(t *testing.T) {
 		t.Errorf("delete query = %q", q)
 	}
 	om := fixture(t, "media_only_me")
-	if err := testItem(insta, strings.Split(om.Path, "/")[4]).Archive(); err != nil {
+	if err := testItem(insta, strings.Split(om.Path, "/")[4]).Archive(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, om, r.sent[1])
 	pin := fixture(t, "pin_timeline_media")
 	pk := pin.ReqForm["post_id"]
-	if err := testItem(insta, pk+"_42865264907").Pin(); err != nil {
+	if err := testItem(insta, pk+"_42865264907").Pin(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, pin, r.sent[2])
@@ -628,7 +634,7 @@ func TestSearchAndFollowLists(t *testing.T) {
 	insta, r := newReplay(t, "account_serp", "info_stream_search", "followers_list", "following_list",
 		"following_list_page", "info_stream_following", "show_many")
 	serp := fixture(t, "account_serp")
-	res, err := insta.SearchUsers(serp.Query["query"])
+	res, err := insta.SearchUsers(t.Context(), serp.Query["query"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -642,7 +648,7 @@ func TestSearchAndFollowLists(t *testing.T) {
 	if target == nil {
 		t.Fatalf("searched user missing among %d", len(res.Users))
 	}
-	if err := target.Sync(); err != nil {
+	if err := target.Sync(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "info_stream_search"), r.sent[1])
@@ -650,24 +656,25 @@ func TestSearchAndFollowLists(t *testing.T) {
 		t.Errorf("entry_point = %v", ep)
 	}
 
-	followers, err := target.Followers("")
-	if err != nil {
+	followers := target.Followers()
+	if err := followers.Next(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "followers_list"), r.sent[2])
-	if len(followers.Users) == 0 || followers.Users[0].ID == 0 || followers.Users[0].Username == "" {
+	if len(followers.Items) == 0 || followers.Items[0].ID == 0 || followers.Items[0].Username == "" {
 		t.Error("followers not parsed")
 	}
 
-	following, err := target.Following("")
-	if err != nil {
+	following := target.Following()
+	if err := following.Next(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "following_list"), r.sent[3])
-	if !following.HasMore || following.NextMaxID != "25" {
-		t.Errorf("following paging = %v %q", following.HasMore, following.NextMaxID)
+	if !following.More() {
+		t.Error("following has no next page")
 	}
-	if _, err := target.Following(following.NextMaxID); err != nil {
+	firstFollowed := following.Items[0]
+	if err := following.Next(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "following_list_page"), r.sent[4])
@@ -680,8 +687,8 @@ func TestSearchAndFollowLists(t *testing.T) {
 
 	fs := fixture(t, "info_stream_following")
 	followed := insta.NewUser(mustInt(t, strings.Split(fs.Path, "/")[4]))
-	followed.entry = following.Users[0].entry
-	if err := followed.Sync(); err != nil {
+	followed.entry = firstFollowed.entry
+	if err := followed.Sync(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fs, r.sent[5])
@@ -694,7 +701,7 @@ func TestSearchAndFollowLists(t *testing.T) {
 	for _, s := range strings.Split(sm.ReqForm["user_ids"], ", ") {
 		ids = append(ids, mustInt(t, s))
 	}
-	st, err := insta.Friendships(ids...)
+	st, err := insta.Friendships(t.Context(), ids...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -706,7 +713,7 @@ func TestSearchAndFollowLists(t *testing.T) {
 
 func TestSelfInfoStream(t *testing.T) {
 	insta, r := newReplay(t, "info_stream_self")
-	if err := insta.NewUser(42865264907).Sync(); err != nil {
+	if err := insta.NewUser(42865264907).Sync(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "info_stream_self"), r.sent[0])
@@ -714,8 +721,7 @@ func TestSelfInfoStream(t *testing.T) {
 
 func TestActivity(t *testing.T) {
 	insta, r := newReplay(t, "news_inbox", "news_inbox_seen")
-	insta.Activity.Next()
-	if err := insta.Activity.Error(); err != nil && err != ErrNoMore {
+	if err := insta.Activity().Next(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "news_inbox"), r.sent[0])
@@ -724,8 +730,7 @@ func TestActivity(t *testing.T) {
 
 func TestCollections(t *testing.T) {
 	insta, r := newReplay(t, "collections_list")
-	insta.Collections.Next()
-	if err := insta.Collections.Error(); err != nil && err != ErrNoMore {
+	if err := insta.Collections().Next(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "collections_list"), r.sent[0], "count", "media_id")
@@ -742,7 +747,7 @@ func testJPEG(t *testing.T, w, h int) io.Reader {
 
 func TestUploadPhoto(t *testing.T) {
 	insta, r := newReplay(t, "rupload_feed", "configure")
-	it, err := insta.UploadPhoto(testJPEG(t, 1080, 1350), "Love it!")
+	it, err := insta.UploadPhoto(t.Context(), testJPEG(t, 1080, 1350), PostOptions{Caption: "Love it!"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -763,7 +768,13 @@ func TestUploadPhoto(t *testing.T) {
 
 func TestUploadAlbum(t *testing.T) {
 	insta, r := newReplay(t, "rupload_sidecar", "configure_sidecar")
-	_, _ = insta.UploadAlbum([]io.Reader{testJPEG(t, 100, 100), testJPEG(t, 100, 120)}, "Mono caption")
+	album, err := insta.UploadAlbum(t.Context(), []io.Reader{testJPEG(t, 100, 100), testJPEG(t, 100, 120)}, PostOptions{Caption: "Mono caption"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if album.MediaType != MediaAlbum || album.ID != "4017452512634029760_42865264907" || len(album.CarouselMedia) == 0 {
+		t.Errorf("album = %s %v with %d children", album.ID, album.MediaType, len(album.CarouselMedia))
+	}
 	if len(r.sent) != 3 {
 		t.Fatalf("sent %d requests, want 3", len(r.sent))
 	}
@@ -795,7 +806,7 @@ func TestUploadAlbum(t *testing.T) {
 
 func TestUploadStory(t *testing.T) {
 	insta, r := newReplay(t, "rupload_story", "configure_story")
-	if _, err := insta.UploadStory(testJPEG(t, 1080, 1920)); err != nil {
+	if _, err := insta.UploadStory(t.Context(), testJPEG(t, 1080, 1920)); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "rupload_story"), r.sent[0])
@@ -811,14 +822,14 @@ func TestReels(t *testing.T) {
 	insta, r := newReplay(t, "clips_discover", "clips_seen")
 	f := fixture(t, "clips_discover")
 	reels := insta.Reels()
-	if err := reels.Next(); err != nil {
+	if err := reels.Next(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, f, r.sent[0])
-	if len(reels.Items) == 0 || reels.Items[0].ID == "" || reels.NextMaxID == "" {
-		t.Errorf("reels not parsed: %d items, next %q", len(reels.Items), reels.NextMaxID)
+	if len(reels.Items) == 0 || reels.Items[0].ID == "" || !reels.More() {
+		t.Errorf("reels not parsed: %d items, more %v", len(reels.Items), reels.More())
 	}
-	if err := reels.MarkSeen(&Item{Pk: 4017333050152331980}); err != nil {
+	if err := insta.MarkReelsSeen(t.Context(), &Item{Pk: 4017333050152331980}); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "clips_seen"), r.sent[1])
@@ -830,8 +841,8 @@ func TestReels(t *testing.T) {
 func TestProfilePosts(t *testing.T) {
 	insta, r := newReplay(t, "profile_timeline")
 	f := fixture(t, "profile_timeline")
-	posts, err := insta.NewUser(4213518589).Posts("")
-	if err != nil {
+	posts := insta.NewUser(4213518589).Posts()
+	if err := posts.Next(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, f, r.sent[0])
@@ -871,10 +882,18 @@ func TestSessionRoundTrip(t *testing.T) {
 
 func mustInt(t *testing.T, s string) int64 {
 	t.Helper()
-	var n json.Number = json.Number(s)
+	n := json.Number(s)
 	v, err := n.Int64()
 	if err != nil {
 		t.Fatal(err)
 	}
 	return v
+}
+
+func gzipReader(raw []byte) ([]byte, error) {
+	zr, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	return io.ReadAll(zr)
 }

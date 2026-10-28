@@ -1,5 +1,46 @@
-Use https://github.com/Davincible/goinsta as base and use the log_http as helper to make it working and updating.
+# go-insta
 
-This will be a private repo and we can remove any methods not discovered I can provide the new endpoints
+Private Instagram Android API client (app 453.0.0.55.79), rebuilt from device
+captures on top of [Davincible/goinsta](https://github.com/Davincible/goinsta).
+Requests replay the app's TLS fingerprint, headers and attestation.
 
-lmk
+## Session
+
+A session file holds the device ids, token, password key and the attestation
+keys (`attestation.zca_key_pem`, `usdid_key_pem`, `last_uploaded_key_time_ms`,
+`usdid_uuid`). It is written mode 0600; treat it as a credential.
+
+```sh
+go run ./cmd/httplog session log_http.txt > login.session.json   # from a capture
+IG_PASSWORD=... go run ./cmd/login -user NAME                     # password login
+go run ./cmd/smoke [-writes]                                      # live check
+```
+
+## Use
+
+Every call takes a `context.Context`. Paged endpoints return a `*Pager[T]`:
+`Next(ctx)` loads one page into `Items` (`ErrNoMore` at the end), `All(ctx)`
+ranges over every item, `Collect(ctx, n)` gathers up to n.
+
+```go
+insta, err := goinsta.ImportSession("login.session.json")
+defer insta.ExportSession("login.session.json") // keeps rotated headers
+
+for post, err := range user.Posts().All(ctx) { ... }
+followers, err := user.Followers().Collect(ctx, 200)
+
+tray, err := insta.StoryTray(ctx, goinsta.TrayColdStart)
+err = insta.LoadReels(ctx, tray.Reels...) // fills unloaded reels, batched
+
+item, err := insta.UploadAlbum(ctx, photos, goinsta.PostOptions{Caption: "hi"})
+paths, err := item.DownloadTo(ctx, "out/")
+```
+
+Pagers: `Timeline()`, `Reels()`, `Collections()`, `Activity()`,
+`User.Posts/Followers/Following()`, `Item.Comments()`.
+
+One `*Instagram` can be shared across goroutines; each pager belongs to one.
+`Login` must not overlap other requests. Rate-limit waits and, at debug level,
+every response body go to `insta.Logger` (an `*slog.Logger`, default `slog.Default()`).
+
+`PLAN.md` tracks the remaining work.

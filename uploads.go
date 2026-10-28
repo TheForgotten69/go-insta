@@ -1,13 +1,17 @@
 package goinsta
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -51,7 +55,7 @@ func newUploadID() string {
 }
 
 // shareType is "feed" or "stories"; album children pass the album's client_sidecar_id as sessionID.
-func (insta *Instagram) uploadPhoto(p *photo, shareType, sessionID string) error {
+func (insta *Instagram) uploadPhoto(ctx context.Context, p *photo, shareType, sessionID string) error {
 	p.uploadID = newUploadID()
 	sidecar := sessionID != ""
 	if !sidecar {
@@ -85,11 +89,15 @@ func (insta *Instagram) uploadPhoto(p *photo, shareType, sessionID string) error
 		return err
 	}
 	name := fmt.Sprintf("%s_0_%d", p.uploadID, rand.Int32()-rand.Int32())
-	body, _, err := insta.sendRequest(&reqOptions{
+	var resp struct {
+		UploadID string `json:"upload_id"`
+		Status   string `json:"status"`
+	}
+	err = insta.callJSON(ctx, &reqOptions{
 		Endpoint:     fmt.Sprintf(urlUploadPhoto, name),
 		OmitAPI:      true,
 		IsPost:       true,
-		DataBytes:    bytes.NewBuffer(p.data),
+		DataBytes:    p.data,
 		Priority:     "u=6, i",
 		FriendlyName: "undefined:media-upload",
 		IgnoreHeaders: append([]string{"X-Bloks-Version-Id", "X-Ig-Android-Id", "X-Ig-App-Locale",
@@ -109,15 +117,8 @@ func (insta *Instagram) uploadPhoto(p *photo, shareType, sessionID string) error
 			"X-Fb-Request-Analytics-Tags": `{"network_tags":{"product":"` + insta.sess.AppID +
 				`","surface":"undefined","request_category":"media_upload","purpose":"none","retry_attempt":"0"}}`,
 		},
-	})
+	}, &resp)
 	if err != nil {
-		return err
-	}
-	var resp struct {
-		UploadID string `json:"upload_id"`
-		Status   string `json:"status"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
 		return err
 	}
 	if resp.Status != "ok" {
@@ -127,9 +128,13 @@ func (insta *Instagram) uploadPhoto(p *photo, shareType, sessionID string) error
 }
 
 func (insta *Instagram) deviceInfo() map[string]any {
-	d := Waydroid
+	d, ok := parseUserAgent(insta.sess.UserAgent)
+	if !ok {
+		d = Waydroid
+	}
+	manufacturer, _, _ := strings.Cut(d.Manufacturer, "/")
 	return map[string]any{
-		"manufacturer":    "Waydroid",
+		"manufacturer":    manufacturer,
 		"model":           d.Model,
 		"android_version": d.AndroidVersion,
 		"android_release": strconv.Itoa(d.AndroidRelease),
@@ -173,48 +178,69 @@ func photoEdits(p *photo) (edits, extra map[string]any) {
 	return edits, extra
 }
 
-type configureResp struct {
-	Medias []struct {
-		MediaDict *Item `json:"media_dict"`
-	} `json:"medias"`
-	Status string `json:"status"`
+type configureMedia struct {
+	MediaDict *Item `json:"media_dict"`
 }
 
-func (insta *Instagram) configure(endpoint string, payload map[string]any) (*Item, error) {
+type configureResp struct {
+	Medias []configureMedia `json:"medias"`
+	Status string           `json:"status"`
+}
+
+func (insta *Instagram) configure(ctx context.Context, endpoint string, payload map[string]any) (*Item, error) {
 	q, err := signedBody(payload)
 	if err != nil {
 		return nil, err
 	}
-	body, _, err := insta.sendRequest(&reqOptions{
+	var resp configureResp
+	err = insta.callJSON(ctx, &reqOptions{
 		Endpoint: endpoint,
 		IsPost:   true,
 		Query:    q,
 		Priority: "u=6, i",
 		ExtraHeaders: map[string]string{"X-Fb-Request-Analytics-Tags": `{"network_tags":{"product":"` + insta.sess.AppID +
 			`","surface":"undefined","request_category":"media_upload","purpose":"fetch","retry_attempt":"0"}}`},
-	})
+	}, &resp)
 	if err != nil {
-		return nil, err
-	}
-	var resp configureResp
-	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, err
 	}
 	if len(resp.Medias) == 0 || resp.Medias[0].MediaDict == nil {
 		return nil, fmt.Errorf("%s: no media in response (status %q)", endpoint, resp.Status)
 	}
 	item := resp.Medias[0].MediaDict
+	if endpoint == urlConfigureSidecar {
+		// medias lists each child, then the album itself.
+		i := slices.IndexFunc(resp.Medias, func(m configureMedia) bool {
+			return m.MediaDict != nil && m.MediaDict.MediaType == MediaAlbum
+		})
+		if i < 0 {
+			return nil, fmt.Errorf("%s: no album in response (status %q)", endpoint, resp.Status)
+		}
+		item = resp.Medias[i].MediaDict
+	}
 	setToItem(item, insta, "self_profile")
 	return item, nil
 }
 
+// PostOptions are the optional fields of a feed post; the zero value posts
+// without a caption.
+type PostOptions struct {
+	Caption string
+}
+
+func (o PostOptions) apply(payload map[string]any) {
+	if o.Caption != "" {
+		payload["caption"] = o.Caption
+	}
+}
+
 // UploadPhoto posts a single JPEG or WebP image to the feed.
-func (insta *Instagram) UploadPhoto(r io.Reader, caption string) (*Item, error) {
+func (insta *Instagram) UploadPhoto(ctx context.Context, r io.Reader, opts PostOptions) (*Item, error) {
 	p, err := readPhoto(r)
 	if err != nil {
 		return nil, err
 	}
-	if err := insta.uploadPhoto(p, "feed", ""); err != nil {
+	if err := insta.uploadPhoto(ctx, p, "feed", ""); err != nil {
 		return nil, err
 	}
 	payload := insta.configureBase(p.uploadID)
@@ -224,34 +250,47 @@ func (insta *Instagram) UploadPhoto(r io.Reader, caption string) (*Item, error) 
 	payload["creation_tool_info"] = "[]"
 	payload["app_attribution_android_namespace"] = ""
 	payload["stacked_timeline_metadata"] = stackedTimeline(p.uploadID)
-	if caption != "" {
-		payload["caption"] = caption
-	}
-	return insta.configure(urlConfigure, payload)
+	opts.apply(payload)
+	return insta.configure(ctx, urlConfigure, payload)
 }
 
-// UploadAlbum posts 2 to 10 JPEG or WebP images as one carousel.
-func (insta *Instagram) UploadAlbum(photos []io.Reader, caption string) (*Item, error) {
-	if len(photos) > 10 {
+// UploadAlbum posts 2 to 10 JPEG or WebP images as one carousel. All images are
+// checked before any upload starts; the uploads then run in parallel.
+func (insta *Instagram) UploadAlbum(ctx context.Context, photos []io.Reader, opts PostOptions) (*Item, error) {
+	if len(photos) < 2 || len(photos) > 10 {
 		return nil, ErrCarouselMediaLimit
 	}
-	device, _ := json.Marshal(insta.deviceInfo())
-	sidecarID := newUploadID()
-	children := make([]map[string]any, 0, len(photos))
-	for _, r := range photos {
+	ps := make([]*photo, len(photos))
+	for i, r := range photos {
 		p, err := readPhoto(r)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("photo %d: %w", i+1, err)
 		}
-		if err := insta.uploadPhoto(p, "feed", sidecarID); err != nil {
-			return nil, err
-		}
+		ps[i] = p
+	}
+	sidecarID := newUploadID()
+	errs := make([]error, len(ps))
+	var wg sync.WaitGroup
+	for i, p := range ps {
+		wg.Go(func() { errs[i] = insta.uploadPhoto(ctx, p, "feed", sidecarID) })
+	}
+	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+
+	device, err := json.Marshal(insta.deviceInfo())
+	if err != nil {
+		return nil, err
+	}
+	children := make([]map[string]any, len(ps))
+	for i, p := range ps {
 		edits, extra := photoEdits(p)
 		editsJSON, _ := json.Marshal(edits)
 		extraJSON, _ := json.Marshal(extra)
 		stackedJSON, _ := json.Marshal(stackedTimeline(p.uploadID))
 		// Children carry device/edits/extra as JSON strings, unlike the top level.
-		children = append(children, map[string]any{
+		children[i] = map[string]any{
 			"upload_id":                         p.uploadID,
 			"device":                            string(device),
 			"edits":                             string(editsJSON),
@@ -267,7 +306,7 @@ func (insta *Instagram) UploadAlbum(photos []io.Reader, caption string) (*Item, 
 			"scene_capture_type":                "",
 			"bottom_camera_dial_selected":       "11",
 			"stacked_timeline_metadata":         string(stackedJSON),
-		})
+		}
 	}
 	payload := insta.configureBase(sidecarID)
 	delete(payload, "scene_capture_type")
@@ -277,19 +316,17 @@ func (insta *Instagram) UploadAlbum(photos []io.Reader, caption string) (*Item, 
 	payload["stacked_timeline_metadata"] = []map[string]string{{"action": "ADD", "surface_element": "STACKED_TIMELINE", "target": "MULTI_PHOTO"}}
 	payload["original_width"] = "0"
 	payload["original_height"] = "0"
-	if caption != "" {
-		payload["caption"] = caption
-	}
-	return insta.configure(urlConfigureSidecar, payload)
+	opts.apply(payload)
+	return insta.configure(ctx, urlConfigureSidecar, payload)
 }
 
 // UploadStory posts a JPEG or WebP image to the story.
-func (insta *Instagram) UploadStory(r io.Reader) (*Item, error) {
+func (insta *Instagram) UploadStory(ctx context.Context, r io.Reader) (*Item, error) {
 	p, err := readPhoto(r)
 	if err != nil {
 		return nil, err
 	}
-	if err := insta.uploadPhoto(p, "stories", ""); err != nil {
+	if err := insta.uploadPhoto(ctx, p, "stories", ""); err != nil {
 		return nil, err
 	}
 	now := strconv.FormatInt(time.Now().Unix(), 10)
@@ -309,5 +346,5 @@ func (insta *Instagram) UploadStory(r io.Reader) (*Item, error) {
 	payload["supported_capabilities_new"] = supportedCapabilities
 	payload["media_transformation_info"] = fmt.Sprintf(
 		`{"width":"%d","height":"%d","x_transform":"0","y_transform":"0","zoom":"1.0","rotation":"0.0","background_coverage":100}`, p.w, p.h)
-	return insta.configure(urlConfigureStory, payload)
+	return insta.configure(ctx, urlConfigureStory, payload)
 }

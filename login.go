@@ -1,6 +1,7 @@
 package goinsta
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -34,9 +35,14 @@ type loginFlow struct {
 
 // Login replays the app's logged-out password login: register a fresh zca key
 // (challenge nonce), render the login context (aac), then send the credentials.
-// The registered attestation, if any, is restored afterwards.
-func (insta *Instagram) Login(username, password string) error {
-	base := insta.att
+// The attestation headers in use before the call are restored afterwards.
+func (insta *Instagram) Login(ctx context.Context, username, password string) (err error) {
+	insta.mu.Lock()
+	registered, prevAtt, prevSigned := insta.att, insta.curAtt, insta.attSignedAt
+	insta.mu.Unlock()
+	prevZCA, prevUSDID := insta.header("X-Meta-Zca"), insta.header("X-Meta-Usdid")
+
+	base := registered
 	if base == nil {
 		base = &Attestation{BatteryLevel: 85, BatteryState: "Charging"}
 	}
@@ -44,21 +50,39 @@ func (insta *Instagram) Login(username, password string) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if registered != nil {
+			if rerr := insta.applyAttestation(registered); rerr != nil && err == nil {
+				err = fmt.Errorf("restore attestation: %w", rerr)
+			}
+			return
+		}
+		insta.restoreHeader("X-Meta-Zca", prevZCA)
+		insta.restoreHeader("X-Meta-Usdid", prevUSDID)
+		insta.mu.Lock()
+		insta.curAtt, insta.attSignedAt = prevAtt, prevSigned
+		insta.mu.Unlock()
+	}()
 	if err := insta.applyAttestation(lo); err != nil {
 		return err
 	}
-	if insta.att != nil {
-		defer insta.applyAttestation(insta.att)
-	}
 
 	flow := &loginFlow{waterfallID: generateUUID(), inputPrefix: bloksInstanceID()}
-	if flow.challengeNonce, err = insta.createKeystore(lo.keyHash); err != nil {
+	if flow.challengeNonce, err = insta.createKeystore(ctx, lo.keyHash); err != nil {
 		return fmt.Errorf("create_android_keystore: %w", err)
 	}
-	if flow.aac, err = insta.fetchAAC(flow.waterfallID); err != nil {
+	if flow.aac, err = insta.fetchAAC(ctx, flow.waterfallID); err != nil {
 		return fmt.Errorf("process_client_data_and_redirect: %w", err)
 	}
-	return insta.sendLogin(username, password, flow)
+	return insta.sendLogin(ctx, username, password, flow)
+}
+
+func (insta *Instagram) restoreHeader(k, v string) {
+	if v == "" {
+		insta.headerOptions.Delete(k)
+		return
+	}
+	insta.headerOptions.Store(k, v)
 }
 
 // loggedOutRequest is the logged-out profile: www-claim 0, no x-fb-rmd, no
@@ -67,6 +91,7 @@ func (insta *Instagram) loggedOutRequest(endpoint, friendly, clientEndpoint stri
 	return &reqOptions{
 		Endpoint:      endpoint,
 		IsPost:        true,
+		LoggedOut:     true,
 		Ignore429:     true, // surface the rate limit instead of sleeping 8 minutes
 		FriendlyName:  "IgApi: " + friendly,
 		Query:         query,
@@ -82,8 +107,8 @@ func (insta *Instagram) loggedOutRequest(endpoint, friendly, clientEndpoint stri
 	}
 }
 
-func (insta *Instagram) createKeystore(keyHash string) (string, error) {
-	body, _, err := insta.sendRequest(insta.loggedOutRequest(createKeystoreURL,
+func (insta *Instagram) createKeystore(ctx context.Context, keyHash string) (string, error) {
+	body, _, err := insta.sendRequest(ctx, insta.loggedOutRequest(createKeystoreURL,
 		"attestation/create_android_keystore/", clientEndpointUnknown,
 		map[string]string{"app_scoped_device_id": insta.uuid, "key_hash": keyHash}))
 	if err != nil {
@@ -103,7 +128,7 @@ func (insta *Instagram) createKeystore(keyHash string) (string, error) {
 
 // fetchAAC renders the logged-out entry point, which mints the account-access
 // context the login request must echo back.
-func (insta *Instagram) fetchAAC(waterfallID string) (string, error) {
+func (insta *Instagram) fetchAAC(ctx context.Context, waterfallID string) (string, error) {
 	params := map[string]any{
 		"is_from_logged_out":                            false,
 		"logged_out_user":                               "",
@@ -134,7 +159,7 @@ func (insta *Instagram) fetchAAC(waterfallID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	body, _, err := insta.sendRequest(insta.loggedOutRequest(processClientDataURL,
+	body, _, err := insta.sendRequest(ctx, insta.loggedOutRequest(processClientDataURL,
 		"bloks/async_action/com.bloks.www.bloks.caa.login.process_client_data_and_redirect/",
 		clientEndpointUnknown, form))
 	if err != nil {
@@ -202,7 +227,7 @@ func withBody(err error, body []byte) error {
 	return err
 }
 
-func (insta *Instagram) sendLogin(username, password string, flow *loginFlow) error {
+func (insta *Instagram) sendLogin(ctx context.Context, username, password string, flow *loginFlow) error {
 	insta.mu.Lock()
 	pkB64, keyID := insta.pwPubKey, insta.pwKeyID
 	insta.mu.Unlock()
@@ -236,7 +261,7 @@ func (insta *Instagram) sendLogin(username, password string, flow *loginFlow) er
 	o.ExtraHeaders["X-Ig-Attest-Params"] = attest
 	o.ExtraHeaders["X-Bloks-Prism-Button-Version"] = "CONTROL"
 	o.ExtraHeaders["X-Bloks-Prism-Colors-Enabled"] = "false"
-	body, _, err := insta.sendRequest(o)
+	body, _, err := insta.sendRequest(ctx, o)
 	if err != nil {
 		return withBody(err, body)
 	}
@@ -388,8 +413,8 @@ func (insta *Instagram) applyLoginResponse(body []byte) error {
 	}
 	if m := reDSID.FindSubmatch(flat); m != nil {
 		if id, err := strconv.ParseInt(string(m[1]), 10, 64); err == nil {
+			insta.uid.Store(id)
 			insta.Account.ID = Int64(id)
-			insta.sess.UserID = id
 		}
 	}
 	return nil

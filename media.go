@@ -1,16 +1,21 @@
 package goinsta
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"net/http"
 	neturl "net/url"
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
+	"slices"
+	"strconv"
 	"strings"
+	"sync"
 )
 
 type Item struct {
@@ -25,7 +30,7 @@ type Item struct {
 	DeviceTimestamp   Int64  `json:"device_timestamp"`
 	FacepileTopLikers []struct {
 		FollowFrictionType float64 `json:"follow_friction_type"`
-		FullNeme           string  `json:"full_name"`
+		FullName           string  `json:"full_name"`
 		IsPrivate          bool    `json:"is_private"`
 		IsVerified         bool    `json:"is_verified"`
 		Pk                 float64 `json:"pk"`
@@ -33,17 +38,17 @@ type Item struct {
 		ProfilePicURL      string  `json:"profile_pic_url"`
 		Username           string  `json:"username"`
 	} `json:"facepile_top_likers"`
-	MediaType             int     `json:"media_type"`
-	Code                  string  `json:"code"`
-	ClientCacheKey        string  `json:"client_cache_key"`
-	FilterType            int     `json:"filter_type"`
-	User                  User    `json:"user"`
-	CanReply              bool    `json:"can_reply"`
-	CanReshare            bool    `json:"can_reshare"` // Used for stories
-	CanViewerReshare      bool    `json:"can_viewer_reshare"`
-	Caption               Caption `json:"caption"`
-	CaptionIsEdited       bool    `json:"caption_is_edited"`
-	LikeViewCountDisabled bool    `json:"like_and_view_counts_disabled"`
+	MediaType             MediaType `json:"media_type"`
+	Code                  string    `json:"code"`
+	ClientCacheKey        string    `json:"client_cache_key"`
+	FilterType            int       `json:"filter_type"`
+	User                  User      `json:"user"`
+	CanReply              bool      `json:"can_reply"`
+	CanReshare            bool      `json:"can_reshare"` // Used for stories
+	CanViewerReshare      bool      `json:"can_viewer_reshare"`
+	Caption               Caption   `json:"caption"`
+	CaptionIsEdited       bool      `json:"caption_is_edited"`
+	LikeViewCountDisabled bool      `json:"like_and_view_counts_disabled"`
 	FundraiserTag         struct {
 		HasStandaloneFundraiser bool `json:"has_standalone_fundraiser"`
 	} `json:"fundraiser_tag"`
@@ -55,9 +60,9 @@ type Item struct {
 	NearlyCompleteCopyRightMatch bool   `json:"nearly_complete_copyright_match"`
 	// Toplikers can be `string` or `[]string`.
 	// Use TopLikers function instead of getting it directly.
-	Toplikers  interface{} `json:"top_likers"`
-	Likers     []*User     `json:"likers"`
-	PhotoOfYou bool        `json:"photo_of_you"`
+	Toplikers  any     `json:"top_likers"`
+	Likers     []*User `json:"likers"`
+	PhotoOfYou bool    `json:"photo_of_you"`
 
 	CommentLikesEnabled          bool `json:"comment_likes_enabled"`
 	CommentThreadingEnabled      bool `json:"comment_threading_enabled"`
@@ -68,7 +73,7 @@ type Item struct {
 
 	// Previewcomments can be `string` or `[]string` or `[]Comment`.
 	// Use PreviewComments function instead of getting it directly.
-	Previewcomments interface{} `json:"preview_comments,omitempty"`
+	Previewcomments any `json:"preview_comments,omitempty"`
 
 	Tags struct {
 		In []Tag `json:"in"`
@@ -110,7 +115,7 @@ type Item struct {
 	} `json:"igtv_series_info"`
 	IGTVAdsInfo struct {
 		AdsToggledOn            bool `json:"ads_toggled_on"`
-		ElegibleForInsertingAds bool `json:"is_video_elegible_for_inserting_ads"`
+		EligibleForInsertingAds bool `json:"is_video_elegible_for_inserting_ads"`
 	} `json:"igtv_ads_info"`
 
 	IsCommercial        bool   `json:"is_commercial"`
@@ -126,8 +131,8 @@ type Item struct {
 	AdHeaderStyle       int    `json:"ad_header_style"`
 	AdLinkType          int    `json:"ad_link_type"`
 	AdMetadata          []struct {
-		Type  int         `json:"type"`
-		Value interface{} `json:"value"`
+		Type  int `json:"type"`
+		Value any `json:"value"`
 	} `json:"ad_metadata"`
 	AndroidLinks []struct {
 		AndroidClass      string `json:"androidClass"`
@@ -139,16 +144,16 @@ type Item struct {
 	} `json:"android_links"`
 
 	// Only for stories
-	StoryEvents              []interface{}      `json:"story_events"`
-	StoryHashtags            []interface{}      `json:"story_hashtags"`
-	StoryPolls               []interface{}      `json:"story_polls"`
-	StoryFeedMedia           []interface{}      `json:"story_feed_media"`
-	StorySoundOn             []interface{}      `json:"story_sound_on"`
-	CreativeConfig           interface{}        `json:"creative_config"`
-	StoryLocations           []interface{}      `json:"story_locations"`
-	StorySliders             []interface{}      `json:"story_sliders"`
-	StoryQuestions           []interface{}      `json:"story_questions"`
-	StoryProductItems        []interface{}      `json:"story_product_items"`
+	StoryEvents              []any              `json:"story_events"`
+	StoryHashtags            []any              `json:"story_hashtags"`
+	StoryPolls               []any              `json:"story_polls"`
+	StoryFeedMedia           []any              `json:"story_feed_media"`
+	StorySoundOn             []any              `json:"story_sound_on"`
+	CreativeConfig           any                `json:"creative_config"`
+	StoryLocations           []any              `json:"story_locations"`
+	StorySliders             []any              `json:"story_sliders"`
+	StoryQuestions           []any              `json:"story_questions"`
+	StoryProductItems        []any              `json:"story_product_items"`
 	StoryCTA                 []StoryCTA         `json:"story_cta"`
 	IntegrityReviewDecision  string             `json:"integrity_review_decision"`
 	IsReelMedia              bool               `json:"is_reel_media"`
@@ -220,34 +225,24 @@ type Item struct {
 	} `json:"story_music_stickers,omitempty"`
 }
 
-func (item *Item) MediaToString() string {
-	return MediaToString(item.MediaType)
+type MediaType int
+
+const (
+	MediaPhoto MediaType = 1
+	MediaVideo MediaType = 2
+	MediaAlbum MediaType = 8
+)
+
+var mediaTypeNames = map[MediaType]string{
+	1: "photo", 2: "video", 6: "ad_map", 7: "live", 8: "carousel", 9: "live_replay",
+	10: "collection", 11: "audio", 12: "showreel_native", 13: "guide_facade",
 }
 
-func MediaToString(t int) string {
-	switch t {
-	case 1:
-		return "photo"
-	case 2:
-		return "video"
-	case 6:
-		return "ad_map"
-	case 7:
-		return "live"
-	case 8:
-		return "carousel"
-	case 9:
-		return "live_replay"
-	case 10:
-		return "collection"
-	case 11:
-		return "audio"
-	case 12:
-		return "showreel_native"
-	case 13:
-		return "guide_facade"
+func (t MediaType) String() string {
+	if n, ok := mediaTypeNames[t]; ok {
+		return n
 	}
-	return ""
+	return "media_type_" + strconv.Itoa(int(t))
 }
 
 func setToItem(item *Item, insta *Instagram, module string) {
@@ -260,165 +255,162 @@ func setToItem(item *Item, insta *Instagram, module string) {
 	}
 }
 
-func getname(name string) string {
-	nname := name
-	i := 1
-	for {
-		ext := path.Ext(name)
+type sized interface{ size() (w, h int, url string) }
 
-		_, err := os.Stat(name)
-		if err != nil {
-			break
-		}
-		if ext != "" {
-			nname = strings.Replace(nname, ext, "", -1)
-		}
-		name = fmt.Sprintf("%s.%d%s", nname, i, ext)
-		i++
-	}
-	return name
-}
+func (v Video) size() (int, int, string)     { return v.Width, v.Height, v.URL }
+func (c Candidate) size() (int, int, string) { return c.Width, c.Height, c.URL }
 
-type bestMedia struct {
-	w, h int
-	url  string
-}
-
-// GetBest accepts []Video or []Candidate.
-func GetBest(obj interface{}) string {
-	m := bestMedia{}
-
-	switch t := obj.(type) {
-	case []Video:
-		for _, video := range t {
-			if m.w < video.Width && video.Height > m.h && video.URL != "" {
-				m.w = video.Width
-				m.h = video.Height
-				m.url = video.URL
-			}
-		}
-	case []Candidate:
-		for _, image := range t {
-			if m.w < image.Width && image.Height > m.h && image.URL != "" {
-				m.w = image.Width
-				m.h = image.Height
-				m.url = image.URL
-			}
+func bestURL[T sized](xs []T) string {
+	var area int
+	var url string
+	for _, x := range xs {
+		if w, h, u := x.size(); u != "" && w*h > area {
+			area, url = w*h, u
 		}
 	}
-	return m.url
+	return url
 }
 
-var rxpTags = regexp.MustCompile(`#\w+`)
-
-func (item *Item) DownloadTo(dst string) error {
-	insta := item.insta
-	folder, file := filepath.Split(dst)
-
-	if err := os.MkdirAll(folder, 0o777); err != nil {
-		return err
-	}
-
+func (item *Item) mediaURL() (string, error) {
+	var url string
 	switch item.MediaType {
-	case 1:
-		return insta.downloadTo(folder, file, item.Images.Versions)
-	case 2:
-		return insta.downloadTo(folder, file, item.Videos)
-	case 8:
-		return item.downloadCarousel(folder, file)
+	case MediaPhoto:
+		url = item.Images.Best()
+	case MediaVideo:
+		url = bestURL(item.Videos)
 	}
-
-	insta.warnHandler(
-		fmt.Sprintf(
-			"Unable to download %s media (media type %d), this has not been implemented",
-			item.MediaToString(),
-			item.MediaType,
-		),
-	)
-	return ErrNoMedia
-
+	if url == "" {
+		return "", fmt.Errorf("%s: %w", item.MediaType, ErrNoMedia)
+	}
+	return url, nil
 }
 
-func (item *Item) Download() ([]byte, error) {
-	insta := item.insta
-
-	switch item.MediaType {
-	case 1:
-		url := GetBest(item.Images.Versions)
-		return insta.download(url)
-	case 2:
-		url := GetBest(item.Videos)
-		return insta.download(url)
-	case 8:
-		return nil, fmt.Errorf("Unable to download a carousel with this method, use DownloadTo instead to save it to a file. If this is a feature you wish to use please let me know.")
-	}
-	return nil, ErrNoMedia
-}
-
-func (item *Item) downloadCarousel(folder, fn string) error {
-	if fn == "" {
-		fn = item.ID
-	}
-	for i, media := range item.CarouselMedia {
-		n := fmt.Sprintf("%s_%d", fn, i+1)
-		if err := media.DownloadTo(path.Join(folder, n)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (insta *Instagram) downloadTo(folder, fn string, media interface{}) error {
-	url := GetBest(media)
-	fn, err := getDownloadName(url, fn)
-	if err != nil {
-		return err
-	}
-	b, err := insta.download(url)
-	if err != nil {
-		return err
-	}
-	err = saveToFolder(folder, fn, b)
-	return err
-}
-
-func (insta *Instagram) download(url string) ([]byte, error) {
-	resp, err := insta.c.Get(url)
+// Download returns the photo or video; a carousel has one per child, so use
+// DownloadTo or the children in CarouselMedia.
+func (item *Item) Download(ctx context.Context) ([]byte, error) {
+	url, err := item.mediaURL()
 	if err != nil {
 		return nil, err
 	}
-	media, err := io.ReadAll(resp.Body)
-	return media, err
+	return item.insta.download(ctx, url)
 }
 
-func saveToFolder(folder, fn string, media []byte) error {
-	dst := path.Join(folder, fn)
-
-	file, err := os.Create(dst)
-	if err != nil {
-		return err
+// DownloadTo saves the media and returns the paths written. dst is a file path,
+// or a directory when it ends in a separator or names an existing directory.
+// The extension comes from the URL and existing files are kept (a ".N" suffix
+// is added). Carousel children download in parallel as <name>_<n>.
+func (item *Item) DownloadTo(ctx context.Context, dst string) ([]string, error) {
+	if item.MediaType != MediaAlbum {
+		url, err := item.mediaURL()
+		if err != nil {
+			return nil, err
+		}
+		p, err := item.insta.downloadFile(ctx, url, dst)
+		if err != nil {
+			return nil, err
+		}
+		return []string{p}, nil
 	}
-	defer file.Close()
-
-	b := bytes.NewBuffer(media)
-	_, err = io.Copy(file, b)
-	return err
-
+	dir, name := splitDst(dst)
+	if name == "" {
+		name = item.ID
+	}
+	paths := make([]string, len(item.CarouselMedia))
+	errs := make([]error, len(item.CarouselMedia))
+	var wg sync.WaitGroup
+	for i := range item.CarouselMedia {
+		wg.Go(func() {
+			child := &item.CarouselMedia[i]
+			url, err := child.mediaURL()
+			if err == nil {
+				paths[i], err = item.insta.downloadFile(ctx, url, filepath.Join(dir, fmt.Sprintf("%s_%d", name, i+1)))
+			}
+			errs[i] = err
+		})
+	}
+	wg.Wait()
+	return slices.DeleteFunc(paths, func(p string) bool { return p == "" }), errors.Join(errs...)
 }
 
-func getDownloadName(url, name string) (string, error) {
+func (insta *Instagram) openMedia(ctx context.Context, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := insta.client().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("download %s: %s", url, resp.Status)
+	}
+	return resp, nil
+}
+
+func (insta *Instagram) download(ctx context.Context, url string) ([]byte, error) {
+	resp, err := insta.openMedia(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
+
+func splitDst(dst string) (dir, name string) {
+	if fi, err := os.Stat(dst); err == nil && fi.IsDir() {
+		return dst, ""
+	}
+	return filepath.Split(dst)
+}
+
+func (insta *Instagram) downloadFile(ctx context.Context, url, dst string) (string, error) {
 	u, err := neturl.Parse(url)
 	if err != nil {
 		return "", err
 	}
-	ext := path.Ext(u.Path)
+	dir, name := splitDst(dst)
 	if name == "" {
 		name = path.Base(u.Path)
-	} else if !strings.HasSuffix(name, ext) {
+	}
+	if ext := path.Ext(u.Path); !strings.HasSuffix(name, ext) {
 		name += ext
 	}
-	name = getname(name)
-	return name, nil
+	if dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", err
+		}
+	}
+	resp, err := insta.openMedia(ctx, url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	f, err := createUnique(filepath.Join(dir, name))
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		f.Close()
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), f.Close()
+}
+
+func createUnique(p string) (*os.File, error) {
+	ext := filepath.Ext(p)
+	stem := strings.TrimSuffix(p, ext)
+	for i := 0; ; i++ {
+		name := p
+		if i > 0 {
+			name = fmt.Sprintf("%s.%d%s", stem, i, ext)
+		}
+		f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if !errors.Is(err, fs.ErrExist) {
+			return f, err
+		}
+	}
 }
 
 func (item *Item) TopLikers() []string {
@@ -433,7 +425,7 @@ func (item *Item) TopLikers() []string {
 
 func (item *Item) PreviewComments() []Comment {
 	switch s := item.Previewcomments.(type) {
-	case []interface{}:
+	case []any:
 		if len(s) == 0 {
 			return nil
 		}
@@ -447,7 +439,7 @@ func (item *Item) PreviewComments() []Comment {
 				})
 			}
 			return comments
-		case interface{}:
+		case any:
 			comments := make([]Comment, 0)
 			for i := range s {
 				if buf, err := json.Marshal(s[i]); err != nil {

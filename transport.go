@@ -106,6 +106,9 @@ func newAppTransport(proxyURL *url.URL, insecure bool) (http.RoundTripper, error
 }
 
 func proxyDialer(u *url.URL, d *net.Dialer) (rawDialer, error) {
+	if u.Port() == "" {
+		return nil, fmt.Errorf("proxy %s: missing port", u.Redacted())
+	}
 	switch u.Scheme {
 	case "http":
 		return func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -132,10 +135,12 @@ func dialConnect(ctx context.Context, d *net.Dialer, proxyURL *url.URL, addr str
 	if err != nil {
 		return nil, err
 	}
-	if dl, ok := ctx.Deadline(); ok {
-		conn.SetDeadline(dl)
-		defer conn.SetDeadline(time.Time{})
+	dl, ok := ctx.Deadline()
+	if !ok {
+		dl = time.Now().Add(d.Timeout)
 	}
+	conn.SetDeadline(dl)
+	defer conn.SetDeadline(time.Time{})
 	req := &http.Request{
 		Method: http.MethodConnect,
 		URL:    &url.URL{Opaque: addr},

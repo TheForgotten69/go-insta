@@ -6,25 +6,23 @@ import (
 	"strings"
 )
 
-func leftPad2Len(s string, padStr string, overallLen int) string {
-	padCountInt := 1 + ((overallLen - len(padStr)) / len(padStr))
-	var retStr = strings.Repeat(padStr, padCountInt) + s
-	return retStr[(len(retStr) - overallLen):]
-}
-
 const base64UrlCharmap = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
+// MediaIDFromShortID decodes a post shortcode (the /p/<code>/ part of a URL).
 func MediaIDFromShortID(code string) (string, error) {
-	strID := ""
+	if code == "" || len(code) > 11 {
+		return "", fmt.Errorf("shortcode %q: want 1 to 11 characters", code)
+	}
+	var id uint64
 	for i := 0; i < len(code); i++ {
-		base64 := strings.Index(base64UrlCharmap, string(code[i]))
-		str2bin := strconv.FormatInt(int64(base64), 2)
-		sixbits := leftPad2Len(str2bin, "0", 6)
-		strID = strID + sixbits
+		v := strings.IndexByte(base64UrlCharmap, code[i])
+		if v < 0 {
+			return "", fmt.Errorf("shortcode %q: invalid character %q", code, code[i])
+		}
+		if id > (1<<64-1)>>6 {
+			return "", fmt.Errorf("shortcode %q overflows a media id", code)
+		}
+		id = id<<6 | uint64(v)
 	}
-	result, err := strconv.ParseInt(strID, 2, 64)
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%d", result), nil
+	return strconv.FormatUint(id, 10), nil
 }

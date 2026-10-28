@@ -233,6 +233,20 @@ type Session struct {
 
 	PasswordPubKey string `json:"password_pub_key,omitempty"`
 	PasswordKeyID  string `json:"password_key_id,omitempty"`
+
+	Attestation *AttestationKeys `json:"attestation,omitempty"`
+}
+
+// AttestationKeys identifies the device's registered attestation keys (PKCS8 or
+// SEC1 PEM). LastUploadedKeyTimeMs (zca aka.lastUploadedKeyTimeMs) and USDIDUUID
+// (first field of x-meta-usdid) come from a decoded capture; KeyHash is derived
+// from the zca key when empty.
+type AttestationKeys struct {
+	ZCAKeyPEM             string `json:"zca_key_pem"`
+	USDIDKeyPEM           string `json:"usdid_key_pem"`
+	KeyHash               string `json:"key_hash,omitempty"`
+	LastUploadedKeyTimeMs int64  `json:"last_uploaded_key_time_ms"`
+	USDIDUUID             string `json:"usdid_uuid"`
 }
 
 func ExtractSession(entries []Entry) (Session, error) {

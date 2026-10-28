@@ -1,8 +1,11 @@
 package goinsta
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -25,22 +28,17 @@ type StoryReelMention struct {
 
 type StoryCTA struct {
 	Links []struct {
-		LinkType                                int         `json:"linkType"`
-		WebURI                                  string      `json:"webUri"`
-		AndroidClass                            string      `json:"androidClass"`
-		Package                                 string      `json:"package"`
-		DeeplinkURI                             string      `json:"deeplinkUri"`
-		CallToActionTitle                       string      `json:"callToActionTitle"`
-		RedirectURI                             interface{} `json:"redirectUri"`
-		LeadGenFormID                           string      `json:"leadGenFormId"`
-		IgUserID                                string      `json:"igUserId"`
-		AppInstallObjectiveInvalidationBehavior interface{} `json:"appInstallObjectiveInvalidationBehavior"`
+		LinkType                                int    `json:"linkType"`
+		WebURI                                  string `json:"webUri"`
+		AndroidClass                            string `json:"androidClass"`
+		Package                                 string `json:"package"`
+		DeeplinkURI                             string `json:"deeplinkUri"`
+		CallToActionTitle                       string `json:"callToActionTitle"`
+		RedirectURI                             any    `json:"redirectUri"`
+		LeadGenFormID                           string `json:"leadGenFormId"`
+		IgUserID                                string `json:"igUserId"`
+		AppInstallObjectiveInvalidationBehavior any    `json:"appInstallObjectiveInvalidationBehavior"`
 	} `json:"links"`
-}
-
-type StoryMedia struct {
-	Reel   Reel   `json:"reel"`
-	Status string `json:"status"`
 }
 
 type Reel struct {
@@ -64,7 +62,7 @@ type Reel struct {
 	ReelType               string          `json:"reel_type"`
 	ReelMentions           []string        `json:"reel_mentions"`
 	PrefetchCount          int             `json:"prefetch_count"`
-	HasBestiesMedia        interface{}     `json:"has_besties_media"`
+	HasBestiesMedia        any             `json:"has_besties_media"`
 	HasPrideMedia          bool            `json:"has_pride_media"`
 	HasVideo               bool            `json:"has_video"`
 	IsCacheable            bool            `json:"is_cacheable"`
@@ -81,13 +79,14 @@ type Reel struct {
 	User                 User   `json:"user"`
 }
 
-func (user *User) Stories() (*StoryMedia, error) {
-	return user.insta.fetchStories(int64(user.ID))
+func (user *User) Stories(ctx context.Context) (*Reel, error) {
+	return user.insta.fetchStories(ctx, int64(user.ID))
 }
 
-// Highlights returns the highlight covers; call Reel.Sync to load their items.
-func (user *User) Highlights() ([]*Reel, error) {
-	body, _, err := user.insta.sendRequest(&reqOptions{
+// Highlights returns the highlight covers; LoadReels fills their items.
+func (user *User) Highlights(ctx context.Context) ([]*Reel, error) {
+	tray := &Tray{}
+	err := user.insta.callJSON(ctx, &reqOptions{
 		Endpoint:     fmt.Sprintf(urlUserHighlights, user.ID),
 		Stream:       true,
 		ExtraHeaders: map[string]string{"X-Ig-Accept-Hint": "feed"},
@@ -97,58 +96,85 @@ func (user *User) Highlights() ([]*Reel, error) {
 			"max_highlights_to_fetch_on_pagination": "10",
 			"supported_capabilities_new":            supportedCapabilities,
 		},
-	})
+	}, tray)
 	if err != nil {
 		return nil, err
 	}
-	tray := &Tray{}
-	if err := json.Unmarshal(body, tray); err != nil {
-		return nil, err
-	}
 	tray.set(user.insta)
-	return tray.Stories, nil
+	return tray.Reels, nil
 }
 
-func (media *StoryMedia) setValues(insta *Instagram) {
-	media.Reel.setValues(insta)
-}
-
-func (media *Reel) setValues(insta *Instagram) {
-	media.insta = insta
-	media.User.insta = insta
-	for i, it := range media.Items {
+func (reel *Reel) setValues(insta *Instagram) {
+	reel.insta = insta
+	reel.User.insta = insta
+	for i, it := range reel.Items {
 		setToItem(it, insta, "reel_feed_timeline")
 		it.Index = i
 	}
 }
 
 // ReelID is the tray identifier: a user id, or "highlight:<id>" for highlights.
-func (media *Reel) ReelID() string {
+func (reel *Reel) ReelID() string {
 	var s string
-	if json.Unmarshal(media.ID, &s) == nil {
+	if json.Unmarshal(reel.ID, &s) == nil {
 		return s
 	}
-	return string(media.ID)
+	return string(reel.ID)
 }
 
-func (insta *Instagram) fetchStories(id int64) (*StoryMedia, error) {
-	body, _, err := insta.sendRequest(&reqOptions{
+// Loaded reports whether the reel carries all its items.
+func (reel *Reel) Loaded() bool {
+	return len(reel.Items) > 0 && (reel.MediaCount == 0 || len(reel.Items) >= reel.MediaCount)
+}
+
+func (insta *Instagram) fetchStories(ctx context.Context, id int64) (*Reel, error) {
+	var resp struct {
+		Reel Reel `json:"reel"`
+	}
+	err := insta.callJSON(ctx, &reqOptions{
 		Endpoint: fmt.Sprintf(urlUserStories, id),
 		Query:    map[string]string{"supported_capabilities_new": supportedCapabilities},
-	})
+	}, &resp)
 	if err != nil {
 		return nil, err
 	}
-	m := &StoryMedia{}
-	if err := json.Unmarshal(body, m); err != nil {
-		return nil, err
+	resp.Reel.setValues(insta)
+	return &resp.Reel, nil
+}
+
+// reelsBatch is how many reels one reels_media_stream call loads. Captures only
+// show single-reel calls; a 52-item highlight is 1.4 MB, so 10 stays well
+// under maxBodySize.
+const reelsBatch = 10
+
+// LoadReels fills the items of every reel that is not Loaded, one request per
+// batch of reels, in place.
+func (insta *Instagram) LoadReels(ctx context.Context, reels ...*Reel) error {
+	byID := make(map[string]*Reel, len(reels))
+	var ids []string
+	for _, r := range reels {
+		if !r.Loaded() {
+			id := r.ReelID()
+			byID[id] = r
+			ids = append(ids, id)
+		}
 	}
-	m.setValues(insta)
-	return m, nil
+	for chunk := range slices.Chunk(ids, reelsBatch) {
+		got, err := insta.FetchReels(ctx, chunk...)
+		if err != nil {
+			return err
+		}
+		for id, r := range got {
+			if dst, ok := byID[id]; ok {
+				*dst = *r
+			}
+		}
+	}
+	return nil
 }
 
 // FetchReels loads the items of the given reels (user ids or "highlight:<id>").
-func (insta *Instagram) FetchReels(reelIDs ...string) (map[string]*Reel, error) {
+func (insta *Instagram) FetchReels(ctx context.Context, reelIDs ...string) (map[string]*Reel, error) {
 	q, err := signedBody(map[string]any{
 		"_uid":                       strconv.FormatInt(insta.userID(), 10),
 		"_uuid":                      insta.uuid,
@@ -162,49 +188,51 @@ func (insta *Instagram) FetchReels(reelIDs ...string) (map[string]*Reel, error) 
 	if err != nil {
 		return nil, err
 	}
-	body, _, err := insta.sendRequest(&reqOptions{
+	body, err := insta.call(ctx, &reqOptions{
 		Endpoint:     urlReelsMediaStream,
 		IsPost:       true,
-		Stream:       true,
+		Chunked:      true,
 		Query:        q,
 		ExtraHeaders: map[string]string{"X-Ig-Accept-Hint": "feed"},
 	})
 	if err != nil {
 		return nil, err
 	}
-	var resp struct {
-		Reels map[string]*Reel `json:"reels"`
+	// Each line carries one reel, or client_hints with an empty reels map.
+	reels := make(map[string]*Reel, len(reelIDs))
+	for line := range bytes.Lines(body) {
+		var chunk struct {
+			Reels map[string]*Reel `json:"reels"`
+		}
+		if err := json.Unmarshal(line, &chunk); err != nil {
+			return nil, err
+		}
+		for id, r := range chunk.Reels {
+			r.setValues(insta)
+			reels[id] = r
+		}
 	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, err
-	}
-	for _, r := range resp.Reels {
-		r.setValues(insta)
-	}
-	return resp.Reels, nil
+	return reels, nil
 }
 
-// Sync loads the reel's items (needed for highlights from User.Highlights).
-func (media *Reel) Sync() error {
-	reels, err := media.insta.FetchReels(media.ReelID())
+func (reel *Reel) Sync(ctx context.Context) error {
+	reels, err := reel.insta.FetchReels(ctx, reel.ReelID())
 	if err != nil {
 		return err
 	}
-	r, ok := reels[media.ReelID()]
+	r, ok := reels[reel.ReelID()]
 	if !ok {
 		return ErrNoMedia
 	}
-	insta := media.insta
-	*media = *r
-	media.setValues(insta)
+	*reel = *r
 	return nil
 }
 
-func (media *Reel) MarkSeen(items ...*Item) error {
-	insta := media.insta
-	reelID := media.ReelID()
+func (reel *Reel) MarkSeen(ctx context.Context, items ...*Item) error {
+	insta := reel.insta
+	reelID := reel.ReelID()
 	now := time.Now().Unix()
-	reels := map[string][]string{}
+	reels := make(map[string][]string, len(items))
 	for _, it := range items {
 		reels[it.ID+"_"+reelID] = []string{fmt.Sprintf("%d_%d", it.TakenAt, now)}
 	}
@@ -225,7 +253,7 @@ func (media *Reel) MarkSeen(items ...*Item) error {
 	if err != nil {
 		return err
 	}
-	_, _, err = insta.sendRequest(&reqOptions{
+	_, err = insta.call(ctx, &reqOptions{
 		Endpoint:     urlMediaSeenV2 + "?reel=1&live_vod=0",
 		FriendlyName: "IgApi: media/seen/?reel=1&live_vod=0",
 		UseV2:        true,
@@ -236,7 +264,7 @@ func (media *Reel) MarkSeen(items ...*Item) error {
 	return err
 }
 
-func (item *Item) LikeStory() error {
+func (item *Item) LikeStory(ctx context.Context) error {
 	module := "reel_feed_timeline"
 	if item.module != "" && item.module != "reel_feed_timeline" {
 		module = item.module
@@ -254,6 +282,6 @@ func (item *Item) LikeStory() error {
 	if err != nil {
 		return err
 	}
-	_, _, err = item.insta.sendRequest(&reqOptions{Endpoint: urlStoryLike, IsPost: true, Query: q})
+	_, err = item.insta.call(ctx, &reqOptions{Endpoint: urlStoryLike, IsPost: true, Query: q})
 	return err
 }

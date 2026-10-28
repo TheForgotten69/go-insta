@@ -1,7 +1,9 @@
 # go-insta: remaining work
 
 Status (2026-10-28): password login works live (`go run ./cmd/login`). `go run ./cmd/smoke -writes`
-passes 26/26 live (all reads, plus follow/unfollow and post → comment → delete). Replay tests pass.
+passes 51/51 live: every public method except Login/Logout (reads, follow/unfollow, settings toggle,
+photo/album/story upload with like, save, pin, note, comments, archive, download and delete).
+Parallel album uploads and batched `LoadReels` (10 reels per call) work live. Replay tests pass.
 
 Done since the login fix: attestation re-signed before its 1 h expiry, `SetProxy` keeps the app TLS
 fingerprint (http CONNECT and socks5), rotated password key stored from the login response,
@@ -9,6 +11,7 @@ recommended-post (`explore_story`) feed items parsed, logged-in request profile 
 current build.
 
 Ownership: **[you]** = capture or key work done outside this repo; **[code]** = changes in this repo.
+The `just` recipes below live in `~/Documents/projects/research/instagram/justfile`.
 
 ## Login
 
@@ -25,9 +28,9 @@ Ownership: **[you]** = capture or key work done outside this repo; **[code]** = 
 
 ## Device identity and attestation
 
-5. **Mixed installs** — `login.session.json` and `keys/` come from Waydroid install 1; the app has
-   been reinstalled 3 times since. Re-extract keys and device ids from one current install, or
-   self-register (next item). **[you]**
+5. **Mixed installs** — `login.session.json` (attestation keys now embedded under `attestation`)
+   comes from Waydroid install 1; the app has been reinstalled 3 times since. Re-extract keys and
+   device ids from one current install, or self-register (next item). **[you]**
 6. **Post-login key upload** — after login the app uploads a fresh zca key
    (`create_android_keystore` → `upload_android_keystore_key`); we keep signing with the old
    install-1 key. Flow is mapped (see memory/attestation notes), not built. **[code]**

@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-func testKeyPEM(t *testing.T) ([]byte, *ecdsa.PrivateKey) {
+func testKeyPEM(t *testing.T) (string, *ecdsa.PrivateKey) {
 	t.Helper()
 	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -26,7 +26,7 @@ func testKeyPEM(t *testing.T) ([]byte, *ecdsa.PrivateKey) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), k
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})), k
 }
 
 func newTestAttestation(t *testing.T) (*Attestation, *ecdsa.PrivateKey, *ecdsa.PrivateKey) {
@@ -193,5 +193,41 @@ func TestAttestationResignedBeforeExpiry(t *testing.T) {
 	exp, _ := strconv.ParseInt(strings.Split(after.(string), ".")[1], 10, 64)
 	if time.Until(time.Unix(exp, 0)) < 55*time.Minute {
 		t.Errorf("new usdid expires too soon: %v", time.Unix(exp, 0))
+	}
+}
+
+func TestAttestationWithoutUSDIDKeyDropsStaleHeader(t *testing.T) {
+	insta, _ := newReplay(t)
+	lo, err := (&Attestation{}).loggedOut()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := insta.applyAttestation(lo); err != nil {
+		t.Fatal(err)
+	}
+	if v := insta.header("X-Meta-Usdid"); v != "" {
+		t.Errorf("stale usdid kept: %q", v)
+	}
+}
+
+func TestSessionCarriesAttestation(t *testing.T) {
+	insta, _ := newReplay(t)
+	a, _, _ := newTestAttestation(t)
+	if err := insta.SetAttestation(a); err != nil {
+		t.Fatal(err)
+	}
+	path := t.TempDir() + "/s.json"
+	if err := insta.ExportSession(path); err != nil {
+		t.Fatal(err)
+	}
+	again, err := ImportSession(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.att == nil || again.att.keyHash != a.keyHash || again.att.usdidUUID != a.usdidUUID {
+		t.Fatalf("attestation not restored: %+v", again.att)
+	}
+	if !strings.HasPrefix(again.header("X-Meta-Usdid"), a.usdidUUID+".") {
+		t.Error("imported attestation not signing")
 	}
 }

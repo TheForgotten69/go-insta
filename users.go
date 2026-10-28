@@ -1,21 +1,16 @@
 package goinsta
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"path"
+	"maps"
 	"strconv"
 )
 
-type userResp struct {
-	Status string `json:"status"`
-	User   User   `json:"user"`
-}
-
 type User struct {
-	insta       *Instagram
-	entry       entryContext
-	Collections *Collections
+	insta *Instagram
+	entry entryContext
 
 	ID                     Int64  `json:"pk"`
 	Username               string `json:"username"`
@@ -40,40 +35,40 @@ type User struct {
 	HasAnonymousProfilePicture bool   `json:"has_anonymous_profile_picture"`
 	Biography                  string `json:"biography,omitempty"`
 	BiographyWithEntities      struct {
-		RawText  string        `json:"raw_text"`
-		Entities []interface{} `json:"entities"`
+		RawText  string `json:"raw_text"`
+		Entities []any  `json:"entities"`
 	} `json:"biography_with_entities"`
-	BiographyProductMentions []interface{} `json:"biography_products_mentions"`
+	BiographyProductMentions []any `json:"biography_products_mentions"`
 
-	IsNeedy                        bool          `json:"is_needy"`
-	IsInterestAccount              bool          `json:"is_interest_account"`
-	IsVideoCreator                 bool          `json:"is_video_creator"`
-	IsBusiness                     bool          `json:"is_business"`
-	BestiesCount                   int           `json:"besties_count"`
-	ShowBestiesBadge               bool          `json:"show_besties_badge"`
-	RecentlyBestiedByCount         int           `json:"recently_bestied_by_count"`
-	AccountType                    int           `json:"account_type"`
-	AccountBadges                  []interface{} `json:"account_badges,omitempty"`
-	FbIdV2                         Int64         `json:"fbid_"`
-	IsUnpublished                  bool          `json:"is_unpublished"`
-	UserTagsCount                  int           `json:"usertags_count"`
-	UserTagReviewEnabled           bool          `json:"usertag_review_enabled"`
-	FollowingTagCount              int           `json:"following_tag_count"`
-	MutualFollowersID              []Int64       `json:"profile_context_mutual_follow_ids,omitempty"`
-	FollowFrictionType             int           `json:"follow_friction_type"`
-	ProfileContext                 string        `json:"profile_context,omitempty"`
-	HasBiographyTranslation        bool          `json:"has_biography_translation"`
-	HasSavedItems                  bool          `json:"has_saved_items"`
-	HasChaining                    bool          `json:"has_chaining"`
-	IsFavorite                     bool          `json:"is_favorite"`
-	IsFavoriteForStories           bool          `json:"is_favorite_for_stories"`
-	IsFavoriteForHighlights        bool          `json:"is_favorite_for_highlights"`
-	IsProfileActionNeeded          bool          `json:"is_profile_action_needed"`
-	CanBeReportedAsFraud           bool          `json:"can_be_reported_as_fraud"`
-	CanSeeSupportInbox             bool          `json:"can_see_support_inbox"`
-	CanSeeSupportInboxV1           bool          `json:"can_see_support_inbox_v1"`
-	CanSeePrimaryCountryInsettings bool          `json:"can_see_primary_country_in_settings"`
-	CanFollowHashtag               bool          `json:"can_follow_hashtag"`
+	IsNeedy                        bool    `json:"is_needy"`
+	IsInterestAccount              bool    `json:"is_interest_account"`
+	IsVideoCreator                 bool    `json:"is_video_creator"`
+	IsBusiness                     bool    `json:"is_business"`
+	BestiesCount                   int     `json:"besties_count"`
+	ShowBestiesBadge               bool    `json:"show_besties_badge"`
+	RecentlyBestiedByCount         int     `json:"recently_bestied_by_count"`
+	AccountType                    int     `json:"account_type"`
+	AccountBadges                  []any   `json:"account_badges,omitempty"`
+	FbIdV2                         Int64   `json:"fbid_"`
+	IsUnpublished                  bool    `json:"is_unpublished"`
+	UserTagsCount                  int     `json:"usertags_count"`
+	UserTagReviewEnabled           bool    `json:"usertag_review_enabled"`
+	FollowingTagCount              int     `json:"following_tag_count"`
+	MutualFollowersID              []Int64 `json:"profile_context_mutual_follow_ids,omitempty"`
+	FollowFrictionType             int     `json:"follow_friction_type"`
+	ProfileContext                 string  `json:"profile_context,omitempty"`
+	HasBiographyTranslation        bool    `json:"has_biography_translation"`
+	HasSavedItems                  bool    `json:"has_saved_items"`
+	HasChaining                    bool    `json:"has_chaining"`
+	IsFavorite                     bool    `json:"is_favorite"`
+	IsFavoriteForStories           bool    `json:"is_favorite_for_stories"`
+	IsFavoriteForHighlights        bool    `json:"is_favorite_for_highlights"`
+	IsProfileActionNeeded          bool    `json:"is_profile_action_needed"`
+	CanBeReportedAsFraud           bool    `json:"can_be_reported_as_fraud"`
+	CanSeeSupportInbox             bool    `json:"can_see_support_inbox"`
+	CanSeeSupportInboxV1           bool    `json:"can_see_support_inbox_v1"`
+	CanSeePrimaryCountryInsettings bool    `json:"can_see_primary_country_in_settings"`
+	CanFollowHashtag               bool    `json:"can_follow_hashtag"`
 
 	CanBoostPosts                  bool   `json:"can_boost_posts"`
 	CanSeeOrganicInsights          bool   `json:"can_see_organic_insights"`
@@ -83,7 +78,7 @@ type User struct {
 	CanCreateNewPersonalFundraiser bool   `json:"can_create_new_standalone_personal_fundraiser"`
 	CanBeTaggedAsSponsor           bool   `json:"can_be_tagged_as_sponsor"`
 	PersonalAccountAdsPageName     string `json:"personal_account_ads_page_name,omitempty"`
-	PersonalAccountAdsId           string `json:"personal_account_ads_page_id,omitempty"`
+	PersonalAccountAdsID           string `json:"personal_account_ads_page_id,omitempty"`
 	Category                       string `json:"category,omitempty"`
 
 	ShowShoppableFeed           bool `json:"show_shoppable_feed"`
@@ -112,17 +107,17 @@ type User struct {
 	RequestContactEnabled      bool `json:"request_contact_enabled"`
 	FeedPostReshareDisabled    bool `json:"feed_post_reshare_disabled"`
 	CreatorShoppingInfo        struct {
-		LinkedMerchantAccounts []interface{} `json:"linked_merchant_accounts,omitempty"`
+		LinkedMerchantAccounts []any `json:"linked_merchant_accounts,omitempty"`
 	} `json:"creator_shopping_info,omitempty"`
 	StandaloneFundraiserInfo struct {
-		HasActiveFundraiser                 bool        `json:"has_active_fundraiser"`
-		FundraiserId                        Int64       `json:"fundraiser_id"`
-		FundraiserTitle                     string      `json:"fundraiser_title"`
-		FundraiserType                      interface{} `json:"fundraiser_type"`
-		FormattedGoalAmount                 string      `json:"formatted_goal_amount"`
-		BeneficiaryUsername                 string      `json:"beneficiary_username"`
-		FormattedFundraiserProgressInfoText string      `json:"formatted_fundraiser_progress_info_text"`
-		PercentRaised                       interface{} `json:"percent_raised"`
+		HasActiveFundraiser                 bool   `json:"has_active_fundraiser"`
+		FundraiserID                        Int64  `json:"fundraiser_id"`
+		FundraiserTitle                     string `json:"fundraiser_title"`
+		FundraiserType                      any    `json:"fundraiser_type"`
+		FormattedGoalAmount                 string `json:"formatted_goal_amount"`
+		BeneficiaryUsername                 string `json:"beneficiary_username"`
+		FormattedFundraiserProgressInfoText string `json:"formatted_fundraiser_progress_info_text"`
+		PercentRaised                       any    `json:"percent_raised"`
 	} `json:"standalone_fundraiser_info"`
 	AggregatePromoteEngagement   bool         `json:"aggregate_promote_engagement"`
 	AllowMentionSetting          string       `json:"allow_mention_setting,omitempty"`
@@ -144,7 +139,6 @@ type User struct {
 	IncludeDirectBlacklistStatus bool         `json:"include_direct_blacklist_status"`
 	HdProfilePicURLInfo          PicURLInfo   `json:"hd_profile_pic_url_info,omitempty"`
 	HdProfilePicVersions         []PicURLInfo `json:"hd_profile_pic_versions,omitempty"`
-	School                       School       `json:"school"`
 	Byline                       string       `json:"byline"`
 	SocialContext                string       `json:"social_context,omitempty"`
 	SearchSocialContext          string       `json:"search_social_context,omitempty"`
@@ -158,30 +152,30 @@ type User struct {
 	Friendship                   Friendship   `json:"friendship_status"`
 	AutoExpandChaining           bool         `json:"auto_expand_chaining"`
 
-	AllowedToCreateNonprofitFundraisers        bool          `json:"is_allowed_to_create_standalone_nonprofit_fundraisers"`
-	AllowedToCreatePersonalFundraisers         bool          `json:"is_allowed_to_create_standalone_personal_fundraisers"`
-	IsElegibleToShowFbCrossSharingNux          bool          `json:"is_eligible_to_show_fb_cross_sharing_nux"`
-	PageIdForNewSumaBizAccount                 interface{}   `json:"page_id_for_new_suma_biz_account"`
-	ElegibleShoppingSignupEntrypoints          []interface{} `json:"eligible_shopping_signup_entrypoints"`
-	IsIgdProductPickerEnabled                  bool          `json:"is_igd_product_picker_enabled"`
-	IsElegibleForAffiliateShopOnboarding       bool          `json:"is_eligible_for_affiliate_shop_onboarding"`
-	IsElegibleForSMBSupportFlow                bool          `json:"is_eligible_for_smb_support_flow"`
-	ElegibleShoppingFormats                    []interface{} `json:"eligible_shopping_formats"`
-	NeedsToAcceptShoppingSellerOnboardingTerms bool          `json:"needs_to_accept_shopping_seller_onboarding_terms"`
-	SellerShoppableFeedType                    string        `json:"seller_shoppable_feed_type"`
-	VisibleProducts                            int           `json:"num_visible_storefront_products"`
-	IsShoppingCatalogSettingsEnabled           bool          `json:"is_shopping_settings_enabled"`
-	IsShoppingCommunityContentEnabled          bool          `json:"is_shopping_community_content_enabled"`
-	IsShoppingAutoHighlightEnabled             bool          `json:"is_shopping_auto_highlight_eligible"`
-	IsShoppingCatalogSourceSelectionEnabled    bool          `json:"is_shopping_catalog_source_selection_enabled"`
-	ProfessionalConversionSuggestedAccountType int           `json:"professional_conversion_suggested_account_type"`
-	InteropMessagingUserfbid                   Int64         `json:"interop_messaging_user_fbid"`
-	LinkedFbInfo                               struct{}      `json:"linked_fb_info"`
-	HasElegibleWhatsappLinkingCategory         struct{}      `json:"has_eligible_whatsapp_linking_category"`
-	ExistingUserAgeCollectionEnabled           bool          `json:"existing_user_age_collection_enabled"`
-	AboutYourAccountBloksEntrypointEnabled     bool          `json:"about_your_account_bloks_entrypoint_enabled"`
-	OpenExternalUrlWithInAppBrowser            bool          `json:"open_external_url_with_in_app_browser"`
-	MerchantCheckoutStyle                      string        `json:"merchant_checkout_style"`
+	AllowedToCreateNonprofitFundraisers        bool     `json:"is_allowed_to_create_standalone_nonprofit_fundraisers"`
+	AllowedToCreatePersonalFundraisers         bool     `json:"is_allowed_to_create_standalone_personal_fundraisers"`
+	IsEligibleToShowFbCrossSharingNux          bool     `json:"is_eligible_to_show_fb_cross_sharing_nux"`
+	PageIDForNewSumaBizAccount                 any      `json:"page_id_for_new_suma_biz_account"`
+	EligibleShoppingSignupEntrypoints          []any    `json:"eligible_shopping_signup_entrypoints"`
+	IsIgdProductPickerEnabled                  bool     `json:"is_igd_product_picker_enabled"`
+	IsEligibleForAffiliateShopOnboarding       bool     `json:"is_eligible_for_affiliate_shop_onboarding"`
+	IsEligibleForSMBSupportFlow                bool     `json:"is_eligible_for_smb_support_flow"`
+	EligibleShoppingFormats                    []any    `json:"eligible_shopping_formats"`
+	NeedsToAcceptShoppingSellerOnboardingTerms bool     `json:"needs_to_accept_shopping_seller_onboarding_terms"`
+	SellerShoppableFeedType                    string   `json:"seller_shoppable_feed_type"`
+	VisibleProducts                            int      `json:"num_visible_storefront_products"`
+	IsShoppingCatalogSettingsEnabled           bool     `json:"is_shopping_settings_enabled"`
+	IsShoppingCommunityContentEnabled          bool     `json:"is_shopping_community_content_enabled"`
+	IsShoppingAutoHighlightEnabled             bool     `json:"is_shopping_auto_highlight_eligible"`
+	IsShoppingCatalogSourceSelectionEnabled    bool     `json:"is_shopping_catalog_source_selection_enabled"`
+	ProfessionalConversionSuggestedAccountType int      `json:"professional_conversion_suggested_account_type"`
+	InteropMessagingUserfbid                   Int64    `json:"interop_messaging_user_fbid"`
+	LinkedFbInfo                               struct{} `json:"linked_fb_info"`
+	HasEligibleWhatsappLinkingCategory         struct{} `json:"has_eligible_whatsapp_linking_category"`
+	ExistingUserAgeCollectionEnabled           bool     `json:"existing_user_age_collection_enabled"`
+	AboutYourAccountBloksEntrypointEnabled     bool     `json:"about_your_account_bloks_entrypoint_enabled"`
+	OpenExternalUrlWithInAppBrowser            bool     `json:"open_external_url_with_in_app_browser"`
+	MerchantCheckoutStyle                      string   `json:"merchant_checkout_style"`
 
 	ProfilePic []byte
 }
@@ -194,22 +188,25 @@ func (insta *Instagram) NewUser(id int64) *User {
 	return &User{insta: insta, ID: Int64(id)}
 }
 
-func (insta *Instagram) UserByID(id int64) (*User, error) {
+func (insta *Instagram) UserByID(ctx context.Context, id int64) (*User, error) {
 	u := insta.NewUser(id)
-	return u, u.Sync()
+	if err := u.Sync(ctx); err != nil {
+		return nil, err
+	}
+	return u, nil
 }
 
 // Info uses the legacy users/{id}/info/ endpoint, which the app still calls for the own account.
-func (user *User) Info() error {
-	body, err := user.insta.sendSimpleRequest(urlUserInfo, user.ID)
+func (user *User) Info(ctx context.Context) error {
+	body, err := user.insta.call(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlUserInfo, user.ID)})
 	if err != nil {
 		return err
 	}
 	return user.unmarshal(body)
 }
 
-func (user *User) Sync() error {
-	body, _, err := user.insta.sendRequest(&reqOptions{
+func (user *User) Sync(ctx context.Context) error {
+	body, err := user.insta.call(ctx, &reqOptions{
 		Endpoint:     fmt.Sprintf(urlUserInfoStream, user.ID),
 		FriendlyName: "IgApi: user_info_stream_by_id",
 		IsPost:       true,
@@ -241,14 +238,14 @@ func (user *User) infoStreamQuery() map[string]string {
 }
 
 func (user *User) unmarshal(body []byte) error {
-	insta := user.insta
+	insta, entry := user.insta, user.entry
 	resp := struct {
 		User *User `json:"user"`
 	}{User: user}
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return err
 	}
-	user.insta = insta
+	user.insta, user.entry = insta, entry
 	return nil
 }
 
@@ -261,56 +258,49 @@ func (user *User) friendshipPayload(extra map[string]string) map[string]string {
 		"include_follow_friction_check": "1",
 		"container_module":              "profile",
 	}
-	return MergeMapS(p, extra)
+	maps.Copy(p, extra)
+	return p
 }
 
 // Follow updates user.Friendship; for a private account it becomes an outgoing request.
-func (user *User) Follow() error {
-	return user.changeFriendship(urlUserFollow, map[string]string{"device_id": user.insta.dID})
+func (user *User) Follow(ctx context.Context) error {
+	return user.changeFriendship(ctx, urlUserFollow, map[string]string{"device_id": user.insta.dID})
 }
 
-func (user *User) Unfollow() error {
-	return user.changeFriendship(urlUserUnfollow, nil)
+func (user *User) Unfollow(ctx context.Context) error {
+	return user.changeFriendship(ctx, urlUserUnfollow, nil)
 }
 
-func (user *User) changeFriendship(endpoint string, extra map[string]string) error {
+func (user *User) changeFriendship(ctx context.Context, endpoint string, extra map[string]string) error {
 	q, err := signedBody(user.friendshipPayload(extra))
 	if err != nil {
 		return err
 	}
-	body, _, err := user.insta.sendRequest(&reqOptions{
-		Endpoint: fmt.Sprintf(endpoint, user.ID),
-		Query:    q,
-		IsPost:   true,
-	})
-	if err != nil {
-		return err
-	}
 	var resp friendResp
-	if err := json.Unmarshal(body, &resp); err != nil {
+	if err := user.insta.callJSON(ctx, &reqOptions{Endpoint: fmt.Sprintf(endpoint, user.ID), Query: q, IsPost: true}, &resp); err != nil {
 		return err
 	}
 	user.Friendship = resp.Friendship
 	return nil
 }
 
-func (user *User) GetFriendship() (*Friendship, error) {
-	body, _, err := user.insta.sendRequest(&reqOptions{
+func (user *User) LoadFriendship(ctx context.Context) (*Friendship, error) {
+	err := user.insta.callJSON(ctx, &reqOptions{
 		Endpoint: fmt.Sprintf(urlFriendship, user.ID),
 		Query:    map[string]string{"is_external_deeplink_profile_view": "false"},
-	})
+	}, &user.Friendship)
 	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(body, &user.Friendship); err != nil {
 		return nil, err
 	}
 	return &user.Friendship, nil
 }
 
 // SuggestedUsers is the "similar accounts" carousel shown on a profile.
-func (user *User) SuggestedUsers() ([]*User, error) {
-	body, _, err := user.insta.sendRequest(&reqOptions{
+func (user *User) SuggestedUsers(ctx context.Context) ([]*User, error) {
+	var resp struct {
+		Users []*User `json:"users"`
+	}
+	err := user.insta.callJSON(ctx, &reqOptions{
 		Endpoint: urlDiscoverChaining,
 		Query: map[string]string{
 			"consumption_surface":      "profile_hscroll",
@@ -322,24 +312,18 @@ func (user *User) SuggestedUsers() ([]*User, error) {
 			"target_id":                user.ID.String(),
 			"target_username":          user.Username,
 		},
-	})
+	}, &resp)
 	if err != nil {
-		return nil, err
-	}
-	var resp struct {
-		Users []*User `json:"users"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, err
 	}
 	return user.insta.usersFrom(resp.Users, entrySuggested), nil
 }
 
-func (user *User) DownloadProfilePic() ([]byte, error) {
+func (user *User) DownloadProfilePic(ctx context.Context) ([]byte, error) {
 	if user.ProfilePicURL == "" {
 		return nil, ErrNoMedia
 	}
-	b, err := user.insta.download(user.ProfilePicURL)
+	b, err := user.insta.download(ctx, user.ProfilePicURL)
 	if err != nil {
 		return nil, err
 	}
@@ -347,16 +331,11 @@ func (user *User) DownloadProfilePic() ([]byte, error) {
 	return b, nil
 }
 
-// DownloadProfilePicTo derives the file name and extension from the URL when dst is a directory.
-func (user *User) DownloadProfilePicTo(dst string) error {
-	folder, fn := path.Split(dst)
-	b, err := user.DownloadProfilePic()
-	if err != nil {
-		return err
+// DownloadProfilePicTo saves the picture to dst, see Item.DownloadTo; it
+// returns the path written.
+func (user *User) DownloadProfilePicTo(ctx context.Context, dst string) (string, error) {
+	if user.ProfilePicURL == "" {
+		return "", ErrNoMedia
 	}
-	fn, err = getDownloadName(user.ProfilePicURL, fn)
-	if err != nil {
-		return err
-	}
-	return saveToFolder(folder, fn, b)
+	return user.insta.downloadFile(ctx, user.ProfilePicURL, dst)
 }

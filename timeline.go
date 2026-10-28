@@ -1,23 +1,21 @@
 package goinsta
 
 import (
+	"context"
 	"encoding/json"
 	"math/rand/v2"
 	"strconv"
 	"time"
 )
 
+// Timeline pages the home feed. Its first page is a cold start; Refresh
+// reloads the head like pull-to-refresh.
 type Timeline struct {
-	insta     *Instagram
-	err       error
-	sessionID string
-	started   bool
-
-	Items []*Item
-	Tray  *Tray
-
-	MoreAvailable bool
-	NextID        string
+	*Pager[*Item]
+	insta   *Instagram
+	nextID  string
+	started bool
+	pos     int
 }
 
 type feedCache struct {
@@ -58,39 +56,29 @@ type feedCache struct {
 	HideLikeAndViewCounts      float64 `json:"hide_like_and_view_counts"`
 }
 
-func newTimeline(insta *Instagram) *Timeline {
-	return &Timeline{insta: insta, sessionID: generateUUID()}
-}
-
-// Next loads the next page into tl.Items; the first call is a cold start.
-// It returns false at the end of the feed (Error() == ErrNoMore) or on error.
-func (tl *Timeline) Next() bool {
-	if tl.err != nil {
-		return false
-	}
-	reason := "cold_start_fetch"
-	if tl.started {
-		if !tl.MoreAvailable || tl.NextID == "" {
-			tl.err = ErrNoMore
-			return false
+func (insta *Instagram) Timeline() *Timeline {
+	tl := &Timeline{insta: insta}
+	tl.Pager = newPager(func(ctx context.Context) ([]*Item, bool, error) {
+		reason := "cold_start_fetch"
+		if tl.started {
+			reason = "pagination"
 		}
-		reason = "pagination"
-	}
-	if err := tl.fetch(reason); err != nil {
-		tl.err = err
-		return false
-	}
-	return true
+		return tl.fetch(ctx, reason)
+	})
+	return tl
 }
 
-// Refresh replaces the items with a fresh head of the feed, like pull-to-refresh.
-func (tl *Timeline) Refresh() error {
-	tl.Items = nil
-	tl.err = nil
-	return tl.fetch("auto_refresh")
+func (tl *Timeline) Refresh(ctx context.Context) error {
+	tl.pos, tl.nextID = 0, ""
+	items, more, err := tl.fetch(ctx, "auto_refresh")
+	if err != nil {
+		return err
+	}
+	tl.Items, tl.done = items, !more
+	return nil
 }
 
-func (tl *Timeline) fetch(reason string) error {
+func (tl *Timeline) fetch(ctx context.Context, reason string) ([]*Item, bool, error) {
 	insta := tl.insta
 	now := time.Now()
 	q := map[string]string{
@@ -102,7 +90,7 @@ func (tl *Timeline) fetch(reason string) error {
 		"device_timezone_name":            insta.sess.TimezoneName,
 		"client_recorded_request_time_ms": strconv.FormatInt(now.UnixMilli(), 10),
 		"request_id":                      generateUUID(),
-		"session_id":                      tl.sessionID,
+		"session_id":                      insta.feedSessionID,
 		"reason":                          reason,
 		"is_pull_to_refresh":              "0",
 		"feed_view_info":                  "[]",
@@ -126,17 +114,17 @@ func (tl *Timeline) fetch(reason string) error {
 	}
 	switch reason {
 	case "pagination":
-		q["max_id"] = tl.NextID
+		q["max_id"] = tl.nextID
 		q["pagination_source"] = "feed_recs"
 		friendly += "_tail"
 		tail = "true"
-	default:
-		headers["X-Ig-Accept-Hint"] = "feed"
 	case "auto_refresh":
 		q["is_pull_to_refresh"] = "1"
+	default:
+		headers["X-Ig-Accept-Hint"] = "feed"
 	}
 
-	body, _, err := insta.sendRequest(&reqOptions{
+	body, err := insta.call(ctx, &reqOptions{
 		Endpoint:     urlTimeline,
 		FriendlyName: friendly,
 		IsPost:       true,
@@ -144,19 +132,19 @@ func (tl *Timeline) fetch(reason string) error {
 		Stream:       true,
 		Priority:     "u=0",
 		Query:        q,
-		ExtraHeaders: MergeMapS(headers, map[string]string{"X-Ig-Tail-Load-Request": tail}),
+		ExtraHeaders: mergeForms(headers, map[string]string{"X-Ig-Tail-Load-Request": tail}),
 	})
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 
 	var page feedCache
 	if err := json.Unmarshal(body, &page); err != nil {
-		return err
+		return nil, false, err
 	}
 	tl.started = true
-	tl.NextID = page.NextID
-	tl.MoreAvailable = page.MoreAvailable
+	tl.nextID = page.NextID
+	items := make([]*Item, 0, len(page.Items))
 	for _, it := range page.Items {
 		item := it.MediaOrAd
 		if item == nil && it.ExploreStory != nil {
@@ -164,56 +152,49 @@ func (tl *Timeline) fetch(reason string) error {
 		}
 		if item != nil {
 			setToItem(item, insta, "feed_timeline")
-			item.Index = len(tl.Items)
-			tl.Items = append(tl.Items, item)
+			item.Index = tl.pos
+			tl.pos++
+			items = append(items, item)
 		}
 	}
-	return nil
+	return items, page.MoreAvailable && page.NextID != "", nil
 }
 
-// FetchTray loads the stories tray. reason is "cold_start" or "pull_to_refresh".
-func (tl *Timeline) FetchTray(reason string) error {
-	insta := tl.insta
+type TrayReason string
+
+const (
+	TrayColdStart     TrayReason = "cold_start"
+	TrayPullToRefresh TrayReason = "pull_to_refresh"
+)
+
+// StoryTray loads the stories tray. Reels further down arrive without items;
+// LoadReels fills them in batches.
+func (insta *Instagram) StoryTray(ctx context.Context, reason TrayReason) (*Tray, error) {
 	q := map[string]string{
 		"_uuid":           insta.uuid,
 		"page_size":       "50",
-		"reason":          reason,
+		"reason":          string(reason),
 		"request_id":      generateUUID(),
 		"timezone_offset": insta.sess.TimezoneOffset,
 		"tray_session_id": generateUUID(),
 	}
-	if reason != "cold_start" {
+	if reason != TrayColdStart {
 		q["supported_capabilities_new"] = supportedCapabilities
 	}
-	body, _, err := insta.sendRequest(&reqOptions{
+	tray := &Tray{}
+	err := insta.callJSON(ctx, &reqOptions{
 		Endpoint:     urlStories,
 		IsPost:       true,
 		Stream:       true,
 		Priority:     "u=0",
 		Query:        q,
 		ExtraHeaders: map[string]string{"X-Ig-Tail-Load-Request": "false"},
-	})
+	}, tray)
 	if err != nil {
-		return err
-	}
-	tray := &Tray{}
-	if err := json.Unmarshal(body, tray); err != nil {
-		return err
+		return nil, err
 	}
 	tray.set(insta)
-	tl.Tray = tray
-	return nil
-}
-
-func (tl *Timeline) Stories() []*Reel {
-	if tl.Tray == nil {
-		return nil
-	}
-	return tl.Tray.Stories
-}
-
-func (tl *Timeline) Error() error {
-	return tl.err
+	return tray, nil
 }
 
 func localTimezoneName() string {

@@ -2,8 +2,10 @@ package goinsta
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -15,7 +17,7 @@ const (
 )
 
 // purpose is "fetch", "refresh" or "prefetch"; "" omits it, as list and search queries do.
-func (insta *Instagram) graphQL(friendly, docID, rootField, purpose string, vars map[string]any) ([]byte, error) {
+func (insta *Instagram) graphQL(ctx context.Context, friendly, docID, rootField, purpose string, vars map[string]any) ([]byte, error) {
 	v, err := json.Marshal(vars)
 	if err != nil {
 		return nil, err
@@ -47,8 +49,8 @@ func (insta *Instagram) graphQL(friendly, docID, rootField, purpose string, vars
 	}
 	headers["X-Fb-Request-Analytics-Tags"] = `{"network_tags":{"product":"` + insta.sess.AppID +
 		`","request_category":"graphql","purpose":"` + tagPurpose + `","retry_attempt":"0"}}`
-	body, _, err := insta.sendRequest(&reqOptions{
-		Endpoint: graphQLUrl,
+	body, err := insta.call(ctx, &reqOptions{
+		Endpoint: graphQLURL,
 		IsPost:   true,
 		Gzip:     true,
 		Priority: "u=3, i",
@@ -149,15 +151,33 @@ func rootField(data map[string]json.RawMessage, name string) (json.RawMessage, b
 	return nil, false
 }
 
-type ProfilePosts struct {
-	Items         []*Item
-	MoreAvailable bool
-	NextMaxID     string
+func (user *User) Posts() *Pager[*Item] {
+	var maxID, cursor string
+	var pos int
+	return newPager(func(ctx context.Context) ([]*Item, bool, error) {
+		vars := profileTimelineVars(user.ID)
+		if maxID != "" {
+			vars["max_id"] = maxID
+			vars["profile_grid_items_cursor"] = cursor
+			vars["pinned_profile_grid_items_ids"] = ""
+			vars["request_media_chunk"] = false
+		}
+		body, err := user.insta.graphQL(ctx, "IGProfileTimelineQuery", docProfileTimeline, "xdt_api__v1__profile_timeline", "fetch", vars)
+		if err != nil {
+			return nil, false, err
+		}
+		page, err := parseProfilePosts(user.insta, body, pos)
+		if err != nil {
+			return nil, false, err
+		}
+		maxID, cursor = page.nextMaxID, page.gridCursor
+		pos += len(page.items)
+		return page.items, page.more && maxID != "", nil
+	})
 }
 
-// Posts returns one page of the user's profile grid; pass "" then NextMaxID.
-func (user *User) Posts(maxID string) (*ProfilePosts, error) {
-	vars := map[string]any{
+func profileTimelineVars(id Int64) map[string]any {
+	return map[string]any{
 		"request_media_chunk": true, "request_hints_chunk": true, "defer_hints_chunk": true,
 		"skip_ig_play_count": false, "enable_carousel_media_count_in_deferred": false,
 		"skip_clips_captions_fields": false, "num_previews_for_associated_highlights": 3,
@@ -171,22 +191,19 @@ func (user *User) Posts(maxID string) (*ProfilePosts, error) {
 		"include_horizon_attribution_info": false, "force_compute_user_tags": false,
 		"exclude_pinned_posts": false, "include_ring_creator_fields": false, "exclude_highlights": false,
 		"include_is_unseen_by_viewer": false, "include_timeline_ordered_edge": false,
-		"exclude_besties_content": false, "user_id": user.ID.String(),
+		"exclude_besties_content": false, "user_id": id.String(),
 		"include_hidden_feed_product_tags": false, "enabled_featured_pin_user_ids": false,
 		"exclude_comment": "true", "include_hidden_reel_product_tags": false,
 	}
-	// Paging was not captured; max_id mirrors the variable named in the root field.
-	if maxID != "" {
-		vars["max_id"] = maxID
-	}
-	body, err := user.insta.graphQL("IGProfileTimelineQuery", docProfileTimeline, "xdt_api__v1__profile_timeline", "fetch", vars)
-	if err != nil {
-		return nil, err
-	}
-	return parseProfilePosts(user.insta, body)
 }
 
-func parseProfilePosts(insta *Instagram, body []byte) (*ProfilePosts, error) {
+type profilePage struct {
+	items                 []*Item
+	more                  bool
+	nextMaxID, gridCursor string
+}
+
+func parseProfilePosts(insta *Instagram, body []byte, pos int) (*profilePage, error) {
 	var resp struct {
 		Data map[string]json.RawMessage `json:"data"`
 	}
@@ -206,13 +223,17 @@ func parseProfilePosts(insta *Instagram, body []byte) (*ProfilePosts, error) {
 		} `json:"profile_grid_items"`
 		MoreAvailable bool    `json:"more_available"`
 		NextMaxID     *string `json:"next_max_id"`
+		GridCursor    *string `json:"profile_grid_items_cursor"`
 	}
 	if err := json.Unmarshal(raw, &tl); err != nil {
 		return nil, err
 	}
-	out := &ProfilePosts{MoreAvailable: tl.MoreAvailable}
+	page := &profilePage{more: tl.MoreAvailable, items: make([]*Item, 0, len(tl.Grid))}
 	if tl.NextMaxID != nil {
-		out.NextMaxID = *tl.NextMaxID
+		page.nextMaxID = *tl.NextMaxID
+	}
+	if tl.GridCursor != nil {
+		page.gridCursor = *tl.GridCursor
 	}
 	for _, g := range tl.Grid {
 		if g.Media == nil || g.Media.Item == nil {
@@ -222,9 +243,13 @@ func parseProfilePosts(insta *Instagram, body []byte) (*ProfilePosts, error) {
 		if it.TakenAt == 0 {
 			it.TakenAt = g.Media.TakenAt
 		}
+		if it.Pk == 0 {
+			pk, _ := strconv.ParseInt(it.pk(), 10, 64)
+			it.Pk = Int64(pk)
+		}
 		setToItem(it, insta, "profile")
-		it.Index = len(out.Items)
-		out.Items = append(out.Items, it)
+		it.Index = pos + len(page.items)
+		page.items = append(page.items, it)
 	}
-	return out, nil
+	return page, nil
 }

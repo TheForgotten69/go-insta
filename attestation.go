@@ -11,9 +11,10 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"os"
 	"strconv"
 	"time"
+
+	"go-insta/internal/httplog"
 )
 
 // Attestation reproduces the x-meta-zca and x-meta-usdid headers the app signs
@@ -21,6 +22,7 @@ import (
 // not register anything new: keyHash and lastUploadedKeyTimeMs stay the values
 // the device uploaded, carried over from the capture.
 type Attestation struct {
+	cfg                   AttestationConfig
 	zcaKey                *ecdsa.PrivateKey
 	usdidKey              *ecdsa.PrivateKey
 	keyHash               string
@@ -32,18 +34,7 @@ type Attestation struct {
 	BatteryState string
 }
 
-// AttestationConfig identifies the registered keys. KeyHash is derived from the
-// zca key when left empty. The two remaining constants come from a decoded
-// x-meta-zca / x-meta-usdid pair and are not recoverable from the keys alone:
-//   - LastUploadedKeyTimeMs: zca "aka".lastUploadedKeyTimeMs (key upload time)
-//   - USDIDUUID: the first dot-separated field of x-meta-usdid (stable device id)
-type AttestationConfig struct {
-	ZCAKeyPEM             []byte
-	USDIDKeyPEM           []byte
-	KeyHash               string // optional; SHA-256 of the zca SPKI when empty
-	LastUploadedKeyTimeMs int64
-	USDIDUUID             string
-}
+type AttestationConfig = httplog.AttestationKeys
 
 func parseECKey(pemBytes []byte) (*ecdsa.PrivateKey, error) {
 	block, _ := pem.Decode(pemBytes)
@@ -61,23 +52,22 @@ func parseECKey(pemBytes []byte) (*ecdsa.PrivateKey, error) {
 }
 
 func NewAttestation(c AttestationConfig) (*Attestation, error) {
-	zk, err := parseECKey(c.ZCAKeyPEM)
+	zk, err := parseECKey([]byte(c.ZCAKeyPEM))
 	if err != nil {
 		return nil, fmt.Errorf("zca key: %w", err)
 	}
-	uk, err := parseECKey(c.USDIDKeyPEM)
+	uk, err := parseECKey([]byte(c.USDIDKeyPEM))
 	if err != nil {
 		return nil, fmt.Errorf("usdid key: %w", err)
 	}
 	keyHash := c.KeyHash
 	if keyHash == "" {
-		keyHash, err = keyHashOf(zk)
-		if err != nil {
+		if keyHash, err = keyHashOf(zk); err != nil {
 			return nil, err
 		}
 	}
 	return &Attestation{
-		zcaKey: zk, usdidKey: uk, keyHash: keyHash,
+		cfg: c, zcaKey: zk, usdidKey: uk, keyHash: keyHash,
 		lastUploadedKeyTimeMs: c.LastUploadedKeyTimeMs, usdidUUID: c.USDIDUUID,
 		BatteryLevel: 85, BatteryState: "Charging",
 	}, nil
@@ -92,22 +82,6 @@ func keyHashOf(k *ecdsa.PrivateKey) (string, error) {
 	}
 	h := sha256.Sum256(spki)
 	return hex.EncodeToString(h[:]), nil
-}
-
-// NewAttestationFromFiles reads the two PKCS8 EC private keys from disk.
-func NewAttestationFromFiles(zcaKeyPath, usdidKeyPath, keyHash string, lastUploadedKeyTimeMs int64, usdidUUID string) (*Attestation, error) {
-	zk, err := os.ReadFile(zcaKeyPath)
-	if err != nil {
-		return nil, err
-	}
-	uk, err := os.ReadFile(usdidKeyPath)
-	if err != nil {
-		return nil, err
-	}
-	return NewAttestation(AttestationConfig{
-		ZCAKeyPEM: zk, USDIDKeyPEM: uk, KeyHash: keyHash,
-		LastUploadedKeyTimeMs: lastUploadedKeyTimeMs, USDIDUUID: usdidUUID,
-	})
 }
 
 func b64url(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
@@ -200,7 +174,9 @@ func (insta *Instagram) SetAttestation(a *Attestation) error {
 	if err := insta.applyAttestation(a); err != nil {
 		return err
 	}
+	insta.mu.Lock()
 	insta.att = a
+	insta.mu.Unlock()
 	return nil
 }
 
@@ -211,7 +187,9 @@ func (insta *Instagram) applyAttestation(a *Attestation) error {
 		return err
 	}
 	insta.headerOptions.Store("X-Meta-Zca", zca)
-	if a.usdidKey != nil {
+	if a.usdidKey == nil {
+		insta.headerOptions.Delete("X-Meta-Usdid") // a carried-over value would be expired
+	} else {
 		usdid, err := a.USDID(now)
 		if err != nil {
 			return err

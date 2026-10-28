@@ -1,264 +1,471 @@
 // Command smoke runs the API methods against a logged-in session and reports
-// which ones work. By default it only reads. -writes adds reversible pairs on
-// your own account: follow then unfollow, and upload a photo, comment on it,
-// delete the comment and delete the photo.
+// which ones work. By default it only reads. -writes adds reversible actions on
+// your own account: follow/unfollow, toggling story auto-archive, and posting a
+// photo, an album and a story that are interacted with and then deleted.
 package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
+	"io"
 	"os"
+	"os/signal"
 	"time"
 
 	goinsta "go-insta"
 )
 
+type runner struct {
+	ctx     context.Context
+	pause   time.Duration
+	ok, bad int
+}
+
+func (r *runner) step(name string, fn func() (string, error)) {
+	if r.ctx.Err() != nil {
+		return
+	}
+	summary, err := fn()
+	if err != nil {
+		r.bad++
+		fmt.Printf("FAIL  %-26s %v\n", name, err)
+	} else {
+		r.ok++
+		fmt.Printf("ok    %-26s %s\n", name, summary)
+	}
+	time.Sleep(r.pause)
+}
+
+// page loads one page; ErrNoMore on an empty feed is not a failure.
+func page(ctx context.Context, next func(context.Context) error) error {
+	if err := next(ctx); err != nil && !errors.Is(err, goinsta.ErrNoMore) {
+		return err
+	}
+	return nil
+}
+
 func main() {
 	session := flag.String("session", "login.session.json", "logged-in session file")
-	zcaKey := flag.String("zca-key", "keys/zca_key.pem", "zca signing key (PKCS8 PEM)")
-	usdidKey := flag.String("usdid-key", "keys/usdid_key.pem", "usdid signing key (PKCS8 PEM)")
-	lastUpload := flag.Int64("last-upload-ms", 1793119682768, "zca lastUploadedKeyTimeMs")
-	usdidUUID := flag.String("usdid-uuid", "521604d9-eb45-4763-81a7-a748c024e43e", "usdid device uuid")
 	target := flag.String("user", "instagram", "public account to look up")
 	pause := flag.Duration("pause", 2*time.Second, "delay between calls")
-	writes := flag.Bool("writes", false, "also run reversible write pairs (follow/unfollow, post/comment/delete)")
+	writes := flag.Bool("writes", false, "also run reversible writes on your own account")
 	flag.Parse()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
 
 	insta, err := goinsta.ImportSession(*session)
 	if err != nil {
 		fail("session", err)
 	}
-	att, err := goinsta.NewAttestationFromFiles(*zcaKey, *usdidKey, "", *lastUpload, *usdidUUID)
+	dir, err := os.MkdirTemp("", "smoke-")
 	if err != nil {
-		fail("attestation", err)
+		fail("tempdir", err)
 	}
-	if err := insta.SetAttestation(att); err != nil {
-		fail("set attestation", err)
-	}
+	defer os.RemoveAll(dir)
 
-	var ok, bad int
-	step := func(name string, fn func() (string, error)) {
-		summary, err := fn()
-		if err != nil {
-			bad++
-			fmt.Printf("FAIL  %-22s %v\n", name, err)
-		} else {
-			ok++
-			fmt.Printf("ok    %-22s %s\n", name, summary)
-		}
-		time.Sleep(*pause)
-	}
-
-	acc := insta.Account
-	step("account.Sync", func() (string, error) {
-		if err := acc.Sync(); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("@%s (%s), %d followers", acc.Username, acc.FullName, acc.FollowerCount), nil
-	})
-	step("account.ReelSettings", func() (string, error) {
-		s, err := acc.ReelSettings()
-		if err != nil {
-			return "", err
-		}
-		return "auto_archive=" + s.ReelAutoArchive, nil
-	})
-	step("account.Stories", func() (string, error) {
-		s, err := acc.Stories()
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("%d own story items", len(s.Reel.Items)), nil
-	})
-	step("GetAccountFamily", func() (string, error) {
-		b, err := insta.GetAccountFamily()
-		return fmt.Sprintf("%d bytes", len(b)), err
-	})
-
-	var firstPost *goinsta.Item
-	step("timeline.Next", func() (string, error) {
-		tl := insta.Timeline
-		if !tl.Next() {
-			if err := tl.Error(); err != nil && !errors.Is(err, goinsta.ErrNoMore) {
-				return "", err
-			}
-		}
-		if len(tl.Items) > 0 {
-			firstPost = tl.Items[0]
-		}
-		return fmt.Sprintf("%d items, more=%v", len(tl.Items), tl.MoreAvailable), nil
-	})
-	step("timeline.FetchTray", func() (string, error) {
-		if err := insta.Timeline.FetchTray("cold_start"); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("%d story reels in tray", len(insta.Timeline.Stories())), nil
-	})
+	r := &runner{ctx: ctx, pause: *pause}
+	readAccount(r, insta, dir)
+	firstPost := readFeeds(r, insta)
+	user := readUser(r, insta, *target, dir)
 	if firstPost != nil {
-		step("item.Comments", func() (string, error) {
-			c, err := firstPost.Comments()
-			if err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("%d comments on %s", len(c.Items), firstPost.ID), nil
+		r.step("item.Comments (2 pages)", func() (string, error) {
+			c := firstPost.Comments()
+			got, err := c.Collect(ctx, 40)
+			return fmt.Sprintf("%d comments, total %d", len(got), c.Count), err
 		})
 	}
-
-	var user *goinsta.User
-	step("SearchUsers", func() (string, error) {
-		r, err := insta.SearchUsers(*target)
-		if err != nil {
-			return "", err
-		}
-		for _, u := range r.Users {
-			if u.Username == *target {
-				user = u
-			}
-		}
-		if user == nil && len(r.Users) > 0 {
-			user = r.Users[0]
-		}
-		return fmt.Sprintf("%d results", len(r.Users)), nil
-	})
-	if user != nil {
-		step("user.Info", func() (string, error) {
-			if err := user.Info(); err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("@%s id=%d", user.Username, user.ID), nil
-		})
-		step("user.GetFriendship", func() (string, error) {
-			f, err := user.GetFriendship()
-			if err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("following=%v", f.Following), nil
-		})
-		step("Friendships", func() (string, error) {
-			m, err := insta.Friendships(int64(user.ID))
-			return fmt.Sprintf("%d entries", len(m)), err
-		})
-		step("user.Posts", func() (string, error) {
-			p, err := user.Posts("")
-			if err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("%d posts, more=%v", len(p.Items), p.MoreAvailable), nil
-		})
-		step("user.Followers", func() (string, error) {
-			l, err := user.Followers("")
-			if err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("%d users", len(l.Users)), nil
-		})
-		step("user.Following", func() (string, error) {
-			l, err := user.Following("")
-			if err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("%d users", len(l.Users)), nil
-		})
-		step("user.Stories", func() (string, error) {
-			s, err := user.Stories()
-			if err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("%d items", len(s.Reel.Items)), nil
-		})
-		step("user.Highlights", func() (string, error) {
-			h, err := user.Highlights()
-			return fmt.Sprintf("%d highlights", len(h)), err
-		})
-		step("user.SuggestedUsers", func() (string, error) {
-			s, err := user.SuggestedUsers()
-			return fmt.Sprintf("%d users", len(s)), err
-		})
-	}
-
-	step("collections.Next", func() (string, error) {
-		c := insta.Collections
-		c.Next()
-		if err := c.Error(); err != nil && !errors.Is(err, goinsta.ErrNoMore) {
-			return "", err
-		}
-		return fmt.Sprintf("%d collections", len(c.Items)), nil
-	})
-	step("activity.Next", func() (string, error) {
-		a := insta.Activity
-		a.Next()
-		if err := a.Error(); err != nil && !errors.Is(err, goinsta.ErrNoMore) {
-			return "", err
-		}
-		return "inbox fetched", nil
-	})
-	step("reels.Next", func() (string, error) {
-		r := insta.Reels()
-		if err := r.Next(); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("%d reels", len(r.Items)), nil
-	})
-
 	if *writes {
 		if user != nil {
-			step("user.Follow", func() (string, error) { return "@" + user.Username, user.Follow() })
-			step("user.Unfollow", func() (string, error) { return "@" + user.Username, user.Unfollow() })
+			r.step("user.Follow", func() (string, error) { return "@" + user.Username, user.Follow(ctx) })
+			r.step("user.Unfollow", func() (string, error) { return "@" + user.Username, user.Unfollow(ctx) })
 		}
-		var post *goinsta.Item
-		step("UploadPhoto", func() (string, error) {
-			img, err := testJPEG()
-			if err != nil {
-				return "", err
-			}
-			post, err = insta.UploadPhoto(bytes.NewReader(img), "go-insta smoke test")
-			if err != nil {
-				return "", err
-			}
-			return post.ID, nil
-		})
-		if post != nil {
-			var comment *goinsta.Comment
-			step("item.Comment", func() (string, error) {
-				var err error
-				comment, err = post.Comment("smoke test")
-				if err != nil {
-					return "", err
-				}
-				return fmt.Sprint(comment.ID), nil
-			})
-			if comment != nil {
-				step("comment.Delete", func() (string, error) { return "", comment.Delete() })
-			}
-			step("item.Delete", func() (string, error) { return post.ID, post.Delete() })
-		}
+		writeAccount(r, insta)
+		writePost(r, insta)
+		writeAlbum(r, insta, dir)
+		writeStory(r, insta)
 	}
 
 	if err := insta.ExportSession(*session); err != nil {
 		fmt.Fprintln(os.Stderr, "save session:", err)
 	}
-	fmt.Printf("\n%d ok, %d failed\n", ok, bad)
-	if bad > 0 {
+	fmt.Printf("\n%d ok, %d failed\n", r.ok, r.bad)
+	if r.bad > 0 {
 		os.Exit(1)
 	}
 }
 
-// testJPEG draws a 1080x1080 gradient, a size the feed accepts without cropping.
-func testJPEG() ([]byte, error) {
+func readAccount(r *runner, insta *goinsta.Instagram, dir string) {
+	ctx, acc := r.ctx, insta.Account
+	r.step("account.Sync", func() (string, error) {
+		if err := acc.Sync(ctx); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("@%s, %d followers, %d posts", acc.Username, acc.FollowerCount, acc.MediaCount), nil
+	})
+	r.step("account.ReelSettings", func() (string, error) {
+		s, err := acc.ReelSettings(ctx)
+		if err != nil {
+			return "", err
+		}
+		return "auto_archive=" + s.ReelAutoArchive, nil
+	})
+	r.step("account.Stories", func() (string, error) {
+		reel, err := acc.Stories(ctx)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d own story items", len(reel.Items)), nil
+	})
+	r.step("account.SuggestedUsers", func() (string, error) {
+		u, err := acc.SuggestedUsers(ctx)
+		return fmt.Sprintf("%d users", len(u)), err
+	})
+	r.step("account.RestrictedUsers", func() (string, error) {
+		u, err := acc.RestrictedUsers(ctx)
+		return fmt.Sprintf("%d users", len(u)), err
+	})
+	r.step("AccountFamily", func() (string, error) {
+		b, err := insta.AccountFamily(ctx)
+		return fmt.Sprintf("%d bytes", len(b)), err
+	})
+	r.step("user.DownloadProfilePicTo", func() (string, error) {
+		u := acc.User()
+		if err := u.Info(ctx); err != nil {
+			return "", err
+		}
+		return u.DownloadProfilePicTo(ctx, dir+"/")
+	})
+	r.step("Activity + seen", func() (string, error) {
+		a := insta.Activity()
+		if err := page(ctx, a.Next); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d inbox items, %d likes", len(a.Items), a.Counts.Likes), nil
+	})
+	r.step("Collections", func() (string, error) {
+		c, err := insta.Collections().Collect(ctx, 0)
+		return fmt.Sprintf("%d collections", len(c)), err
+	})
+}
+
+func readFeeds(r *runner, insta *goinsta.Instagram) *goinsta.Item {
+	ctx := r.ctx
+	var firstPost *goinsta.Item
+	r.step("Timeline (2 pages)", func() (string, error) {
+		tl := insta.Timeline()
+		if err := page(ctx, tl.Next); err != nil {
+			return "", err
+		}
+		n := len(tl.Items)
+		if n > 0 {
+			firstPost = tl.Items[0]
+		}
+		if err := page(ctx, tl.Next); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d + %d items, last index %d", n, len(tl.Items), lastIndex(tl.Items)), nil
+	})
+	r.step("Timeline.Refresh", func() (string, error) {
+		tl := insta.Timeline()
+		if err := tl.Refresh(ctx); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d items", len(tl.Items)), nil
+	})
+	r.step("StoryTray + LoadReels", func() (string, error) {
+		tray, err := insta.StoryTray(ctx, goinsta.TrayColdStart)
+		if err != nil {
+			return "", err
+		}
+		loaded := 0
+		for _, reel := range tray.Reels {
+			if reel.Loaded() {
+				loaded++
+			}
+		}
+		if err := insta.LoadReels(ctx, tray.Reels...); err != nil {
+			return "", err
+		}
+		items := 0
+		for _, reel := range tray.Reels {
+			items += len(reel.Items)
+		}
+		return fmt.Sprintf("%d reels (%d preloaded), %d items after LoadReels", len(tray.Reels), loaded, items), nil
+	})
+	r.step("Reels (2 pages) + seen", func() (string, error) {
+		reels := insta.Reels()
+		if err := page(ctx, reels.Next); err != nil {
+			return "", err
+		}
+		if len(reels.Items) == 0 {
+			return "no reels", nil
+		}
+		if err := insta.MarkReelsSeen(ctx, reels.Items[0]); err != nil {
+			return "", err
+		}
+		n := len(reels.Items)
+		if err := page(ctx, reels.Next); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d + %d reels", n, len(reels.Items)), nil
+	})
+	return firstPost
+}
+
+func readUser(r *runner, insta *goinsta.Instagram, target, dir string) *goinsta.User {
+	ctx := r.ctx
+	var user *goinsta.User
+	r.step("SearchUsers", func() (string, error) {
+		res, err := insta.SearchUsers(ctx, target)
+		if err != nil {
+			return "", err
+		}
+		for _, u := range res.Users {
+			if u.Username == target {
+				user = u
+			}
+		}
+		if user == nil {
+			return "", fmt.Errorf("@%s not among %d results", target, len(res.Users))
+		}
+		return fmt.Sprintf("%d results", len(res.Users)), nil
+	})
+	if user == nil {
+		return nil
+	}
+	r.step("user.Sync", func() (string, error) {
+		if err := user.Sync(ctx); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("@%s id=%d, %d followers", user.Username, user.ID, user.FollowerCount), nil
+	})
+	r.step("UserByID", func() (string, error) {
+		u, err := insta.UserByID(ctx, int64(user.ID))
+		if err != nil {
+			return "", err
+		}
+		return "@" + u.Username, nil
+	})
+	r.step("user.LoadFriendship", func() (string, error) {
+		f, err := user.LoadFriendship(ctx)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("following=%v", f.Following), nil
+	})
+	r.step("Friendships", func() (string, error) {
+		m, err := insta.Friendships(ctx, int64(user.ID))
+		return fmt.Sprintf("%d entries", len(m)), err
+	})
+	var post *goinsta.Item
+	r.step("user.Posts (2 pages)", func() (string, error) {
+		posts, err := user.Posts().Collect(ctx, 13)
+		if err != nil {
+			return "", err
+		}
+		if len(posts) > 0 {
+			post = posts[0]
+		}
+		return fmt.Sprintf("%d posts, last index %d", len(posts), lastIndex(posts)), nil
+	})
+	if post != nil {
+		r.step("MediaIDFromShortID", func() (string, error) {
+			id, err := goinsta.MediaIDFromShortID(post.Code)
+			if err != nil {
+				return "", err
+			}
+			if id != post.Pk.String() {
+				return "", fmt.Errorf("%s decoded to %s, pk %s", post.Code, id, post.Pk)
+			}
+			return post.Code + " = " + id, nil
+		})
+		r.step("item.DownloadTo", func() (string, error) {
+			paths, err := post.DownloadTo(ctx, dir+"/")
+			return fmt.Sprintf("%d files", len(paths)), err
+		})
+	}
+	r.step("user.Followers (2 pages)", func() (string, error) {
+		u, err := user.Followers().Collect(ctx, 30)
+		return fmt.Sprintf("%d users", len(u)), err
+	})
+	r.step("user.Following", func() (string, error) {
+		l := user.Following()
+		if err := page(ctx, l.Next); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d users, more=%v", len(l.Items), l.More()), nil
+	})
+	r.step("user.Stories", func() (string, error) {
+		reel, err := user.Stories(ctx)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d items", len(reel.Items)), nil
+	})
+	r.step("Highlights + LoadReels", func() (string, error) {
+		hl, err := user.Highlights(ctx)
+		if err != nil || len(hl) == 0 {
+			return "0 highlights", err
+		}
+		if err := insta.LoadReels(ctx, hl...); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d highlights, first has %d items", len(hl), len(hl[0].Items)), nil
+	})
+	r.step("user.SuggestedUsers", func() (string, error) {
+		s, err := user.SuggestedUsers(ctx)
+		return fmt.Sprintf("%d users", len(s)), err
+	})
+	return user
+}
+
+func writeAccount(r *runner, insta *goinsta.Instagram) {
+	ctx, acc := r.ctx, insta.Account
+	r.step("SetStoryAutoArchive x2", func() (string, error) {
+		s, err := acc.ReelSettings(ctx)
+		if err != nil {
+			return "", err
+		}
+		on := s.ReelAutoArchive == "on"
+		if err := acc.SetStoryAutoArchive(ctx, !on); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("toggled from %v and back", on), acc.SetStoryAutoArchive(ctx, on)
+	})
+}
+
+func writePost(r *runner, insta *goinsta.Instagram) {
+	ctx := r.ctx
+	var post *goinsta.Item
+	r.step("UploadPhoto", func() (string, error) {
+		var err error
+		post, err = insta.UploadPhoto(ctx, testJPEG(0), goinsta.PostOptions{Caption: "go-insta smoke test"})
+		if err != nil {
+			return "", err
+		}
+		return post.ID, nil
+	})
+	if post == nil {
+		return
+	}
+	defer r.step("item.Delete (photo)", func() (string, error) { return post.ID, post.Delete(ctx) })
+
+	r.step("item.Like", func() (string, error) { return "", post.Like(ctx) })
+	r.step("item.Save", func() (string, error) { return "", post.Save(ctx) })
+	r.step("item.Download", func() (string, error) {
+		b, err := post.Download(ctx)
+		return fmt.Sprintf("%d bytes", len(b)), err
+	})
+	r.step("item.Pin", func() (string, error) { return "", post.Pin(ctx) })
+	r.step("item.AddNote", func() (string, error) {
+		n, err := post.AddNote(ctx, "smoke")
+		if err != nil {
+			return "", err
+		}
+		return "note " + n.ID, nil
+	})
+	var comment *goinsta.Comment
+	r.step("item.Comment", func() (string, error) {
+		var err error
+		comment, err = post.Comment(ctx, "smoke test")
+		if err != nil {
+			return "", err
+		}
+		return comment.ID.String(), nil
+	})
+	if comment != nil {
+		r.step("comment.Like", func() (string, error) { return "", comment.Like(ctx) })
+		r.step("comment.Unlike", func() (string, error) { return "", comment.Unlike(ctx) })
+		r.step("comment.Replies", func() (string, error) {
+			rs, err := comment.Replies(ctx)
+			return fmt.Sprintf("%d replies", len(rs)), err
+		})
+		r.step("item.Comments (own)", func() (string, error) {
+			c, err := post.Comments().Collect(ctx, 0)
+			return fmt.Sprintf("%d comments", len(c)), err
+		})
+		r.step("comment.Delete", func() (string, error) { return "", comment.Delete(ctx) })
+	}
+	r.step("item.Archive", func() (string, error) { return "", post.Archive(ctx) })
+}
+
+func writeAlbum(r *runner, insta *goinsta.Instagram, dir string) {
+	ctx := r.ctx
+	var album *goinsta.Item
+	r.step("UploadAlbum", func() (string, error) {
+		var err error
+		album, err = insta.UploadAlbum(ctx, []io.Reader{testJPEG(0), testJPEG(80)}, goinsta.PostOptions{Caption: "go-insta album smoke"})
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s, %d children", album.ID, len(album.CarouselMedia)), nil
+	})
+	if album == nil {
+		return
+	}
+	r.step("item.DownloadTo (album)", func() (string, error) {
+		paths, err := album.DownloadTo(ctx, dir+"/")
+		return fmt.Sprintf("%d files", len(paths)), err
+	})
+	r.step("item.Delete (album)", func() (string, error) { return album.ID, album.Delete(ctx) })
+}
+
+func writeStory(r *runner, insta *goinsta.Instagram) {
+	ctx := r.ctx
+	var story *goinsta.Item
+	r.step("UploadStory", func() (string, error) {
+		var err error
+		story, err = insta.UploadStory(ctx, testJPEG(160))
+		if err != nil {
+			return "", err
+		}
+		return story.ID, nil
+	})
+	if story == nil {
+		return
+	}
+	r.step("reel.MarkSeen (own)", func() (string, error) {
+		reel, err := insta.Account.Stories(ctx)
+		if err != nil {
+			return "", err
+		}
+		if len(reel.Items) == 0 {
+			return "", errors.New("uploaded story not in own reel")
+		}
+		return fmt.Sprintf("%d items", len(reel.Items)), reel.MarkSeen(ctx, reel.Items...)
+	})
+	r.step("item.LikeStory (own)", func() (string, error) { return "", story.LikeStory(ctx) })
+	r.step("item.Delete (story)", func() (string, error) { return story.ID, story.Delete(ctx) })
+}
+
+func lastIndex(items []*goinsta.Item) int {
+	if len(items) == 0 {
+		return -1
+	}
+	return items[len(items)-1].Index
+}
+
+// testJPEG draws a 1080x1080 gradient, a size the feed and stories accept
+// without cropping; hue shifts the colours so album children differ.
+func testJPEG(hue uint8) io.Reader {
 	img := image.NewRGBA(image.Rect(0, 0, 1080, 1080))
-	for y := 0; y < 1080; y++ {
-		for x := 0; x < 1080; x++ {
-			img.Set(x, y, color.RGBA{uint8(x / 5), uint8(y / 5), 160, 255})
+	for y := range 1080 {
+		for x := range 1080 {
+			img.Set(x, y, color.RGBA{uint8(x/5) + hue, uint8(y / 5), 160 - hue, 255})
 		}
 	}
 	var buf bytes.Buffer
-	err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90})
-	return buf.Bytes(), err
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
+		fail("jpeg", err)
+	}
+	return &buf
 }
 
 func fail(what string, err error) {

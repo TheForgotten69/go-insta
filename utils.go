@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"image"
 	_ "image/jpeg"
-	_ "image/png"
 	"strconv"
+	"strings"
 	"time"
 
 	_ "golang.org/x/image/webp"
@@ -27,7 +27,7 @@ func getTimeOffset() string {
 
 // createUserAgent formats e.g.
 // Instagram 453.0.0.55.79 Android (33/13; 243dpi; 3839x2160; Waydroid/waydroid; WayDroid x86_64 Device; waydroid_x86_64; unknown; en_US; 1100455565)
-func createUserAgent(device Device) string {
+func createUserAgent(device Device, locale string) string {
 	return fmt.Sprintf("Instagram %s Android (%d/%d; %s; %s; %s; %s; %s; %s; %s; %s)",
 		appVersion,
 		device.AndroidVersion,
@@ -43,11 +43,26 @@ func createUserAgent(device Device) string {
 	)
 }
 
-func MergeMapS(one map[string]string, extra ...map[string]string) map[string]string {
-	for _, e := range extra {
-		for k, v := range e {
-			one[k] = v
-		}
+func parseUserAgent(ua string) (Device, bool) {
+	_, rest, ok := strings.Cut(ua, " Android (")
+	if !ok {
+		return Device{}, false
 	}
-	return one
+	f := strings.Split(strings.TrimSuffix(rest, ")"), "; ")
+	if len(f) != 9 {
+		return Device{}, false
+	}
+	av, ar, ok := strings.Cut(f[0], "/")
+	if !ok {
+		return Device{}, false
+	}
+	ver, err1 := strconv.Atoi(av)
+	rel, err2 := strconv.Atoi(ar)
+	if err1 != nil || err2 != nil {
+		return Device{}, false
+	}
+	return Device{
+		AndroidVersion: ver, AndroidRelease: rel, ScreenDpi: f[1], ScreenResolution: f[2],
+		Manufacturer: f[3], Model: f[4], CodeName: f[5], Chipset: f[6],
+	}, true
 }

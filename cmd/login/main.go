@@ -4,21 +4,18 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 
 	goinsta "go-insta"
 )
 
 func main() {
-	session := flag.String("session", "login.session.json", "session file (device fields + password key)")
+	session := flag.String("session", "login.session.json", "session file (device fields, password key, attestation keys)")
 	user := flag.String("user", "", "username or phone")
-	// Attestation constants from the capture; override if you re-register keys.
-	zcaKey := flag.String("zca-key", "keys/zca_key.pem", "zca signing key (PKCS8 PEM)")
-	usdidKey := flag.String("usdid-key", "keys/usdid_key.pem", "usdid signing key (PKCS8 PEM)")
-	lastUpload := flag.Int64("last-upload-ms", 1793119682768, "zca lastUploadedKeyTimeMs")
-	usdidUUID := flag.String("usdid-uuid", "521604d9-eb45-4763-81a7-a748c024e43e", "usdid device uuid")
 	flag.Parse()
 
 	if *user == "" {
@@ -30,23 +27,15 @@ func main() {
 		fmt.Fprintln(os.Stderr, "set IG_PASSWORD")
 		os.Exit(2)
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
 
 	insta, err := goinsta.ImportSession(*session)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "session:", err)
 		os.Exit(1)
 	}
-	att, err := goinsta.NewAttestationFromFiles(*zcaKey, *usdidKey, "", *lastUpload, *usdidUUID)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "attestation:", err)
-		os.Exit(1)
-	}
-	if err := insta.SetAttestation(att); err != nil {
-		fmt.Fprintln(os.Stderr, "set attestation:", err)
-		os.Exit(1)
-	}
-
-	if err := insta.Login(*user, password); err != nil {
+	if err := insta.Login(ctx, *user, password); err != nil {
 		fmt.Fprintln(os.Stderr, "login failed:", err)
 		os.Exit(1)
 	}
