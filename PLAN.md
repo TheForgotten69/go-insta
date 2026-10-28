@@ -20,9 +20,10 @@ The `just` recipes below live in `~/Documents/projects/research/instagram/justfi
    `LoginTwoFactor(code)` replays `method_picker.navigation.async` -> `verify_code.async`;
    `IG_TOTP_SECRET` makes `cmd/login` non-interactive. See `docs/twofactor.md`.
 
-2. **Clear login errors** — tell apart wrong password, 429, 2FA and checkpoint from the Bloks
-   response instead of "no authorization token". **[you]** capture one failed login (wrong
-   password) with `just login`; no failure response exists yet. **[code]** classify from it.
+2. ~~**Clear login errors**~~ — DONE: wrong password -> `ErrBadPassword` (from the
+   `FIRST_PASSWORD_FAILURE` event in `log_tigon_login_20261028-165404.txt` #6), 429 ->
+   `ErrTooManyRequests`, 2FA -> `ErrTwoFactorRequired`; anything else reports its Bloks
+   `error_info` kind. No checkpoint response has been captured yet.
 3. **Checkpoints (`checkpoint.ufac.*`)** — captcha, contact-point code, selfie flows are in the
    captures but unhandled. **[code]**
 4. `oauth.token.fetch.async` (sent by the app before every login) is skipped. Login works without

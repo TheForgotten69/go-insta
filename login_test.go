@@ -366,6 +366,18 @@ func TestLoginTwoFactor(t *testing.T) {
 	}
 }
 
+func TestClassifyLoginFailure(t *testing.T) {
+	// Fragments of a captured wrong-password response.
+	badPassword := `{"layout":{"bloks_payload":{"action":"(dkc \"pre_mt_behavior\" \"lara_auth_method_redirect_success\" \"FIRST_PASSWORD_FAILURE\" \"account_recovery\") (fgq 2293785 0 (f6m 6 \"error_info\" \"generic_error_dialog\"))"}},"status":"ok"}`
+	if err := classifyLoginFailure([]byte(badPassword)); !errors.Is(err, ErrBadPassword) {
+		t.Errorf("wrong password: %v", err)
+	}
+	other := `{"layout":{"bloks_payload":{"action":"(fgq 2293785 0 (f6m 6 \"error_info\" \"generic_error_dialog\"))"}},"status":"ok"}`
+	if err := classifyLoginFailure([]byte(other)); err == nil || !strings.Contains(err.Error(), "(generic_error_dialog)") {
+		t.Errorf("other failure: %v", err)
+	}
+}
+
 func TestLoginTwoFactorRejectedCode(t *testing.T) {
 	insta, _ := newReplay(t)
 	insta.tfa = &twoFactorState{context: "CTX"}

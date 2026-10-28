@@ -104,6 +104,7 @@ var (
 	// two-factor on; finish with LoginTwoFactor.
 	ErrTwoFactorRequired  = errors.New("two-factor required, finish with LoginTwoFactor")
 	ErrCheckpointRequired = errors.New("checkpoint required, resolve it in the app and capture a new session")
+	ErrBadPassword        = errors.New("the password you entered is incorrect")
 	ErrSessionInvalid     = errors.New("session is missing authorization or user id")
 
 	ErrInvalidImage       = errors.New("invalid file type, please use a jpeg or webp image")

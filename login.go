@@ -335,10 +335,29 @@ func (insta *Instagram) sendLogin(ctx context.Context, username, password string
 		insta.mu.Unlock()
 		return ErrTwoFactorRequired
 	}
-	if bytes.Contains(body, []byte("two_step_verification")) {
+	return classifyLoginFailure(body)
+}
+
+// The failed-login dialog's kind sits in the Bloks payload as
+// (f6m 6 "error_info" "<kind>"), e.g. generic_error_dialog or redirect_two_fac.
+var reLoginErrorInfo = regexp.MustCompile(`"error_info" "([a-z_]+)"`)
+
+// classifyLoginFailure explains a send_login response that carried no bearer
+// and no 2FA context. A wrong password logs a FIRST_PASSWORD_FAILURE-style
+// recovery event, which unlike the dialog text does not depend on the locale.
+func classifyLoginFailure(body []byte) error {
+	flat := unescape(body)
+	if bytes.Contains(flat, []byte("PASSWORD_FAILURE")) {
+		return ErrBadPassword
+	}
+	kind := "unknown"
+	if m := reLoginErrorInfo.FindSubmatch(flat); m != nil {
+		kind = string(m[1])
+	}
+	if kind == "redirect_two_fac" {
 		return fmt.Errorf("two-factor required but its context was not found in the response: %s", snippet(body))
 	}
-	return fmt.Errorf("login failed (wrong credentials or checkpoint): %s", snippet(body))
+	return fmt.Errorf("login failed (%s): %s", kind, snippet(body))
 }
 
 const (
