@@ -43,9 +43,14 @@ func TestPagerCollectStopsEarly(t *testing.T) {
 func TestPagerYieldsError(t *testing.T) {
 	boom := errors.New("boom")
 	p := newPager(func(context.Context) ([]int, bool, error) { return nil, false, boom })
+	seen := 0
 	for _, err := range p.All(t.Context()) {
+		seen++
 		if !errors.Is(err, boom) {
 			t.Errorf("err = %v", err)
 		}
+	}
+	if seen != 1 {
+		t.Errorf("yielded %d times, want the error once", seen)
 	}
 }

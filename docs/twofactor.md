@@ -1,75 +1,75 @@
 # Two-factor login (CAA / app 453)
 
 Programmatic TOTP two-factor login, built from the capture
-`research/instagram/log_tigon_login_20261028-165404.txt`.
+`research/instagram/log_tigon_login_20261028-165404.txt` (requests and responses).
 
 ## The flow the app runs
 
-Logged-out CAA login, then a two-step chain when 2FA is on:
+| # | Call | Role |
+|---|------|------|
+| 26 | `bloks.caa.login.async.send_login_request` | Password accepted, no bearer; response redirects to 2FA (`redirect_two_fac`) and carries the `two_step_verification_context` |
+| 28 | `bloks/apps/two_step_verification.entrypoint` | Screen render |
+| 34 | `bloks/apps/two_step_verification.method_picker` | Screen render |
+| 40 | `two_step_verification.method_picker.navigation.async` | Selects `totp` |
+| 41 | `bloks/apps/two_factor_login.enter_totp_code` | Screen render |
+| 43 | `two_step_verification.verify_code.async` | Submits the code; **response carries the bearer** |
+| 44 | `two_step_verification.has_been_allowed.async` | "Approve from another device" poll, fired in parallel; answers `is_loading false`, no token |
 
-1. `send_login_request` — password is accepted, the response carries **no bearer**
-   and signals 2FA, minting a `two_step_verification_context`.
-2. three Bloks **screen renders** — `two_step_verification.entrypoint` →
-   `method_picker` → `two_factor_login.enter_totp_code`. These are UI; they only
-   thread the context forward.
-3. `two_step_verification.verify_code.async` — submits the code + context.
-4. `two_step_verification.has_been_allowed.async` — returns the bearer.
+We replay 26 → 40 → 43. The screen renders are UI only, and 44 is the push-approval
+poll, which a TOTP login does not need.
 
-We skip step 2 (pure UI) and replay 1 → 3 → 4.
+## Context
 
-## Request specs (verified against the capture)
-
-Both async calls use the logged-out profile (`X-Ig-Www-Claim: 0`, no attest
-params) and client endpoint
-`IgCdsScreenNavigationLoggerModule:com.bloks.www.two_factor_login.enter_totp_code`.
-
-`verify_code.async` body (`params` = JSON):
+The context (about 2.3 KB, base64url) is not a JSON pair. The send_login response
+holds the next screen's params as a Bloks key list followed by a value list:
 
 ```
-client_input_params: { code, machine_id, device_id (android id), family_device_id,
-  should_trust_device: 0, auth_secure_device_id: "", block_store_machine_id: "",
-  cloud_trust_token: null, network_bssid: null }
-server_params: { challenge: "totp", two_step_verification_context, flow_source: "two_factor_login",
-  device_id, spectra_reg_login_data: null, INTERNAL__latency_qpl_marker_id: 36707139,
+(f4i (dkc "two_step_verification_context" "flow_source" "device_id" …)
+     (dkc "AWR9…"                         "two_factor_login" "android-…" …))
+```
+
+`parseTwoFactorContext` finds the key list, takes the key's index and reads the
+same slot from the value list. The same context is echoed unchanged by every
+later call.
+
+## Request specs
+
+All async calls use the logged-out profile (`X-Ig-Www-Claim: 0`, no attest params)
+and every 2FA call shares these params:
+
+```
+client_input_params: { cloud_trust_token: null, network_bssid: null, … }
+server_params: { two_step_verification_context, flow_source: "two_factor_login", device_id,
+  spectra_reg_login_data: null, INTERNAL__latency_qpl_marker_id: 36707139,
   INTERNAL__latency_qpl_instance_id: <int> }
 ```
 
-`has_been_allowed.async` is identical minus `code` and `challenge`.
+- `method_picker.navigation.async`: endpoint `…two_step_verification.method_picker`;
+  client `selected_method: "totp"`; server `should_fallback_to_sms: 0`.
+- `verify_code.async`: endpoint `…two_factor_login.enter_totp_code`; client `code`,
+  `machine_id` (the `X-Mid`), `device_id` (android id), `family_device_id`,
+  `should_trust_device: 0`, `auth_secure_device_id: ""`, `block_store_machine_id: ""`;
+  server `challenge: "totp"`.
 
-`machine_id` is the `X-Mid` the server set during login (falls back to the
-session mid). `device_id` is the android id; `family_device_id` the family uuid.
+The verify_code response embeds the session headers (`IG-Set-Authorization`, rur,
+www-claim, ds-user-id, password key) in the same escaped Bloks shape as a normal
+login, so `applyLoginResponse` parses it.
 
-## What is NOT verified, and why
+## Live status
 
-The capture is request-only: the tigon recorder logs outgoing requests, and
-`just login` passes the API hosts through mitmproxy untouched (otherwise login
-429s). So we have **no response body** for any login call. That leaves two spots
-written to best understanding, each of which surfaces the raw response on failure
-so a single live run pins them down:
+Verified live 2026-10-28: skipping the screen renders and the approval poll is
+accepted, and the verify_code token works for logged-in requests.
 
-- **Context extraction** — `parseTwoFactorContext` scans the `send_login`
-  response for `two_step_verification_context`, the same regex-over-unescaped-
-  Bloks technique `applyLoginResponse` already uses for the session headers. If
-  the field is encoded differently, `LoginTwoFactor` returns the raw response.
-- **Bearer delivery** — we assume `has_been_allowed` returns the session headers
-  in the same Bloks shape as a normal login, and parse them with
-  `applyLoginResponse`.
+Not yet observed: a rejected code's response. `LoginTwoFactor` reports any
+verify_code response without a bearer as a rejected code and includes the start
+of the body.
 
 ## Code
 
 - `Login` returns `ErrTwoFactorRequired` when the password is accepted but 2FA is
   on; it stashes the context and keeps the logged-out attestation applied.
-- `LoginTwoFactor(ctx, code)` replays verify_code → has_been_allowed, then
-  restores the pre-login attestation.
+- `LoginTwoFactor(ctx, code)` replays method_picker → verify_code, then restores the
+  pre-login attestation and fires `OnSessionChange`. The pending login is consumed
+  either way, so a rejected code needs a fresh `Login`.
 - `TOTP(secret, t)` generates the code; `cmd/login` prompts for it, or reads
   `IG_TOTP_SECRET` to run non-interactively.
-
-## Open questions for review
-
-- Are the three skipped screen renders truly stateless, or does the server
-  require `method_picker.navigation.async` to select TOTP before `verify_code`?
-- Does `verify_code` alone return the bearer (making `has_been_allowed`
-  optional), or is the second call required? The capture shows the bearer only
-  on `has_been_allowed`.
-- Is `machine_id` the `X-Mid`, or a distinct 2FA machine id from the (uncaptured)
-  `send_login` response?

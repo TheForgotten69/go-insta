@@ -14,6 +14,7 @@ keys (`attestation.zca_key_pem`, `usdid_key_pem`, `last_uploaded_key_time_ms`,
 go run ./cmd/httplog session log_http.txt > login.session.json   # from a capture
 IG_PASSWORD=... go run ./cmd/login -user NAME                     # password login (prompts for 2FA)
 IG_PASSWORD=... IG_TOTP_SECRET=... go run ./cmd/login -user NAME  # non-interactive 2FA
+IG_PASSWORD=... go run ./cmd/login -user NAME -log login.log       # also log every response (holds the token)
 go run ./cmd/smoke [-writes]                                      # live check
 ```
 

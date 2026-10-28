@@ -1,6 +1,7 @@
 package goinsta
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -21,7 +22,6 @@ var errNoBearer = errors.New("login response carried no authorization token")
 // LoginTwoFactor (code submitted).
 type twoFactorState struct {
 	context string       // two_step_verification_context from the send_login response
-	raw     string       // the raw send_login response, shown if context is missing
 	restore func() error // restores the pre-login attestation, deferred to the code step
 }
 
@@ -55,16 +55,29 @@ type loginFlow struct {
 // LoginTwoFactor with a TOTP code to finish. The logged-out attestation stays
 // applied until then, so do not make other requests in between.
 func (insta *Instagram) Login(ctx context.Context, username, password string) (err error) {
+	insta.mu.Lock()
+	stale := insta.tfa
+	insta.tfa = nil
+	insta.mu.Unlock()
+	if stale != nil && stale.restore != nil {
+		if err := stale.restore(); err != nil {
+			return err
+		}
+	}
 	lo, restore, err := insta.applyLoginAttestation()
 	if err != nil {
 		return err
 	}
 	restoreNow := true
 	defer func() {
-		if restoreNow {
-			if rerr := restore(); rerr != nil && err == nil {
-				err = rerr
-			}
+		if !restoreNow {
+			return
+		}
+		if rerr := restore(); rerr != nil && err == nil {
+			err = rerr
+		}
+		if err == nil {
+			insta.notifySessionChange()
 		}
 	}()
 
@@ -82,9 +95,9 @@ func (insta *Instagram) Login(ctx context.Context, username, password string) (e
 		insta.mu.Lock()
 		if insta.tfa != nil {
 			insta.tfa.restore = restore
+			restoreNow = false
 		}
 		insta.mu.Unlock()
-		restoreNow = false
 	}
 	return err
 }
@@ -313,39 +326,115 @@ func (insta *Instagram) sendLogin(ctx context.Context, username, password string
 		return withBody(err, body)
 	}
 	err = insta.applyLoginResponse(body)
-	if errors.Is(err, errNoBearer) {
-		if context2fa, ok := parseTwoFactorContext(body); ok {
-			insta.mu.Lock()
-			insta.tfa = &twoFactorState{context: context2fa, raw: string(body)}
-			insta.mu.Unlock()
-			return ErrTwoFactorRequired
-		}
-		return fmt.Errorf("login failed (wrong credentials, checkpoint, or unhandled 2FA): %s", snippet(body))
+	if !errors.Is(err, errNoBearer) {
+		return err
 	}
-	return err
+	if context2fa, ok := parseTwoFactorContext(body); ok {
+		insta.mu.Lock()
+		insta.tfa = &twoFactorState{context: context2fa}
+		insta.mu.Unlock()
+		return ErrTwoFactorRequired
+	}
+	if bytes.Contains(body, []byte("two_step_verification")) {
+		return fmt.Errorf("two-factor required but its context was not found in the response: %s", snippet(body))
+	}
+	return fmt.Errorf("login failed (wrong credentials or checkpoint): %s", snippet(body))
 }
 
 const (
-	verifyCodeURL     = "https://i.instagram.com/api/v1/bloks/async_action/com.bloks.www.two_step_verification.verify_code.async/"
-	hasBeenAllowedURL = "https://i.instagram.com/api/v1/bloks/async_action/com.bloks.www.two_step_verification.has_been_allowed.async/"
-	clientEndpointTFA = "IgCdsScreenNavigationLoggerModule:com.bloks.www.two_factor_login.enter_totp_code"
+	methodPickerURL = "https://i.instagram.com/api/v1/bloks/async_action/com.bloks.www.two_step_verification.method_picker.navigation.async/"
+	verifyCodeURL   = "https://i.instagram.com/api/v1/bloks/async_action/com.bloks.www.two_step_verification.verify_code.async/"
+
+	clientEndpointMethodPicker = "IgCdsScreenNavigationLoggerModule:com.bloks.www.two_step_verification.method_picker"
+	clientEndpointTOTP         = "IgCdsScreenNavigationLoggerModule:com.bloks.www.two_factor_login.enter_totp_code"
 )
 
-// two_step_verification_context appears in the send_login 2FA response and is
-// echoed by verify_code/has_been_allowed. Matched over the unescaped Bloks body.
-var reTFACtx = regexp.MustCompile(`two_step_verification_context\\*"\\*[:=]\\*"([A-Za-z0-9_-]{20,})`)
-
+// parseTwoFactorContext finds two_step_verification_context in the send_login
+// response. Bloks encodes the next screen's params as a key list followed by a
+// value list:
+//
+//	(f4i (dkc "two_step_verification_context" "flow_source" …) (dkc "AWR9…" "two_factor_login" …))
 func parseTwoFactorContext(body []byte) (string, bool) {
-	m := reTFACtx.FindSubmatch(unescape(body))
-	if m == nil {
+	flat := unescape(body)
+	const key = `"two_step_verification_context"`
+	k := bytes.Index(flat, []byte(key))
+	if k < 0 {
 		return "", false
 	}
-	return string(m[1]), true
+	start := bytes.LastIndex(flat[:k], []byte("(dkc "))
+	if start < 0 {
+		return "", false
+	}
+	keys, end := lispyList(flat, start+len("(dkc "))
+	idx := -1
+	for i, t := range keys {
+		if t == key {
+			idx = i
+		}
+	}
+	rest := bytes.TrimLeft(flat[end:], " \t\n")
+	if idx < 0 || !bytes.HasPrefix(rest, []byte("(dkc ")) {
+		return "", false
+	}
+	vals, _ := lispyList(rest, len("(dkc "))
+	if idx >= len(vals) {
+		return "", false
+	}
+	v := vals[idx]
+	if len(v) < 3 || v[0] != '"' || v[len(v)-1] != '"' {
+		return "", false
+	}
+	return v[1 : len(v)-1], true
 }
 
-// LoginTwoFactor finishes a login that returned ErrTwoFactorRequired, submitting
-// a TOTP code (see TOTP). It replays verify_code then has_been_allowed, then
-// restores the attestation Login had swapped out.
+// lispyList reads the space-separated items of a Bloks list starting at i (just
+// past its opening "(dkc "), keeping nested lists whole. It returns the items
+// and the index just past the closing paren.
+func lispyList(b []byte, i int) ([]string, int) {
+	var items []string
+	for i < len(b) {
+		switch b[i] {
+		case ')':
+			return items, i + 1
+		case ' ', '\t', '\n':
+			i++
+		case '"':
+			j := bytes.IndexByte(b[i+1:], '"')
+			if j < 0 {
+				return items, len(b)
+			}
+			items = append(items, string(b[i:i+j+2]))
+			i += j + 2
+		case '(':
+			depth, j := 0, i
+			for ; j < len(b); j++ {
+				if b[j] == '(' {
+					depth++
+				} else if b[j] == ')' {
+					if depth--; depth == 0 {
+						break
+					}
+				}
+			}
+			items = append(items, string(b[i:min(j+1, len(b))]))
+			i = j + 1
+		default:
+			j := i
+			for j < len(b) && b[j] != ' ' && b[j] != ')' {
+				j++
+			}
+			items = append(items, string(b[i:j]))
+			i = j
+		}
+	}
+	return items, len(b)
+}
+
+// LoginTwoFactor finishes a login that returned ErrTwoFactorRequired with a TOTP
+// code (see TOTP): it selects the TOTP method, then submits the code, whose
+// response carries the bearer. The pending login is consumed either way, so a
+// rejected code needs a fresh Login. The attestation Login swapped out is
+// restored on return.
 func (insta *Instagram) LoginTwoFactor(ctx context.Context, code string) (err error) {
 	insta.mu.Lock()
 	tfa := insta.tfa
@@ -354,67 +443,70 @@ func (insta *Instagram) LoginTwoFactor(ctx context.Context, code string) (err er
 	if tfa == nil {
 		return errors.New("no pending two-factor login; call Login and check for ErrTwoFactorRequired first")
 	}
-	if tfa.restore != nil {
-		defer func() {
+	defer func() {
+		if tfa.restore != nil {
 			if rerr := tfa.restore(); rerr != nil && err == nil {
 				err = rerr
 			}
-		}()
-	}
-	if tfa.context == "" {
-		return fmt.Errorf("two-factor context not found in login response; raw response: %s", snippet([]byte(tfa.raw)))
-	}
+		}
+		if err == nil {
+			insta.notifySessionChange()
+		}
+	}()
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return errors.New("empty two-factor code")
 	}
-	if _, err := insta.twoStepVerify(ctx, verifyCodeURL, tfa.context, code); err != nil {
+	if _, err := insta.twoStepAction(ctx, methodPickerURL, clientEndpointMethodPicker, tfa.context,
+		map[string]any{"selected_method": "totp"},
+		map[string]any{"should_fallback_to_sms": 0},
+	); err != nil {
+		return fmt.Errorf("method_picker: %w", err)
+	}
+	body, err := insta.twoStepAction(ctx, verifyCodeURL, clientEndpointTOTP, tfa.context,
+		map[string]any{
+			"code":                   code,
+			"auth_secure_device_id":  "",
+			"block_store_machine_id": "",
+			"should_trust_device":    0,
+			"device_id":              insta.dID,
+			"family_device_id":       insta.fID,
+			"machine_id":             insta.machineID(),
+		},
+		map[string]any{"challenge": "totp"},
+	)
+	if err != nil {
 		return fmt.Errorf("verify_code: %w", err)
 	}
-	body, err := insta.twoStepVerify(ctx, hasBeenAllowedURL, tfa.context, "")
-	if err != nil {
-		return fmt.Errorf("has_been_allowed: %w", err)
-	}
-	if aerr := insta.applyLoginResponse(body); aerr != nil {
-		return fmt.Errorf("two-factor accepted but no token in response: %s", snippet(body))
+	if errors.Is(insta.applyLoginResponse(body), errNoBearer) {
+		return fmt.Errorf("two-factor code rejected (wrong or expired?): %s", snippet(body))
 	}
 	return nil
 }
 
-// twoStepVerify posts one of the two-step async actions. code is set only for
-// verify_code; has_been_allowed sends the same body without it.
-func (insta *Instagram) twoStepVerify(ctx context.Context, url, context2fa, code string) ([]byte, error) {
-	machineID := insta.header("X-Mid")
-	if machineID == "" {
-		machineID = insta.sess.Mid
+func (insta *Instagram) machineID() string {
+	if mid := insta.header("X-Mid"); mid != "" {
+		return mid
 	}
-	client := map[string]any{
-		"auth_secure_device_id":  "",
-		"block_store_machine_id": "",
-		"cloud_trust_token":      nil,
-		"device_id":              insta.dID,
-		"family_device_id":       insta.fID,
-		"machine_id":             machineID,
-		"network_bssid":          nil,
-		"should_trust_device":    0,
-	}
-	server := map[string]any{
-		"INTERNAL__latency_qpl_marker_id":   36707139,
-		"INTERNAL__latency_qpl_instance_id": insta.qplInstance(),
-		"device_id":                         insta.dID,
-		"spectra_reg_login_data":            nil,
-		"two_step_verification_context":     context2fa,
-		"flow_source":                       "two_factor_login",
-	}
-	if code != "" {
-		client["code"] = code
-		server["challenge"] = "totp"
-	}
+	return insta.sess.Mid
+}
+
+// twoStepAction posts a two_step_verification async action, adding the fields
+// every step sends to the step-specific client and server params.
+func (insta *Instagram) twoStepAction(ctx context.Context, url, endpoint, context2fa string, client, server map[string]any) ([]byte, error) {
+	client["cloud_trust_token"] = nil
+	client["network_bssid"] = nil
+	server["INTERNAL__latency_qpl_marker_id"] = 36707139
+	server["INTERNAL__latency_qpl_instance_id"] = insta.qplInstance()
+	server["device_id"] = insta.dID
+	server["spectra_reg_login_data"] = nil
+	server["two_step_verification_context"] = context2fa
+	server["flow_source"] = "two_factor_login"
 	form, err := insta.bloksForm(map[string]any{"client_input_params": client, "server_params": server})
 	if err != nil {
 		return nil, err
 	}
-	o := insta.loggedOutRequest(url, "bloks/async_action/"+actionName(url), clientEndpointTFA, form)
+	o := insta.loggedOutRequest(url, "bloks/async_action/"+actionName(url), endpoint, form)
 	o.ExtraHeaders["X-Bloks-Prism-Button-Version"] = "CONTROL"
 	o.ExtraHeaders["X-Bloks-Prism-Colors-Enabled"] = "false"
 	body, _, err := insta.sendRequest(ctx, o)

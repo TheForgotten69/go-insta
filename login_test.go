@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -79,9 +80,10 @@ func TestApplyLoginResponseFailure(t *testing.T) {
 
 // loginServer answers the three logged-out login calls and records each request.
 type loginServer struct {
-	t    *testing.T
-	reqs map[string]*http.Request
-	form map[string]url.Values
+	t         *testing.T
+	reqs      map[string]*http.Request
+	form      map[string]url.Values
+	twoFactor bool // send_login answers with the 2FA redirect
 }
 
 const testAAC = "Q7jiDQEFnnWYRW7pTESTaacTESTaacTESTaac_-0123456789"
@@ -96,9 +98,17 @@ func (s *loginServer) RoundTrip(req *http.Request) (*http.Response, error) {
 	case strings.Contains(req.URL.Path, "process_client_data_and_redirect"):
 		// Shape copied from a capture: aac is a Bloks global-state initial value.
 		name, body = "pcd", `{"layout":{"bloks_payload":{"data":[{"id":"s1","type":"gs","data":{"key":"CAA_ACCOUNT_ACCESS_CONTEXT:aac","mode":"p","initial_lispy":"\t(fhy \"`+testAAC+`\")"}}]}},"status":"ok"}`
+	case strings.Contains(req.URL.Path, "send_login_request") && s.twoFactor:
+		name, body = "login", twoFactorLoginBody
 	case strings.Contains(req.URL.Path, "send_login_request"):
 		name, body = "login", buildBloksHeaders(map[string]string{
 			"IG-Set-Authorization": "Bearer IGT:2:abc", "ig-set-ig-u-ds-user-id": "42865264907",
+		})
+	case strings.Contains(req.URL.Path, "method_picker.navigation.async"):
+		name, body = "method_picker", `{"status":"ok"}`
+	case strings.Contains(req.URL.Path, "verify_code.async"):
+		name, body = "verify_code", buildBloksHeaders(map[string]string{
+			"IG-Set-Authorization": "Bearer IGT:2:tok2fa", "ig-set-ig-u-ds-user-id": "42865264907",
 		})
 	default:
 		s.t.Fatalf("unexpected request %s", req.URL)
@@ -279,11 +289,13 @@ func TestReloginUsesLoggedOutProfile(t *testing.T) {
 	}
 }
 
+// twoFactorLoginBody has the shape of a captured send_login 2FA response: the
+// next screen's params as a Bloks key list then value list.
+const twoFactorLoginBody = `{"layout":{"bloks_payload":{"action":"(fgu (f6m 6 \"error_info\" \"redirect_two_fac\")) (f6m 6 \"params\" (fma (f4i (dkc \"server_params\" \"client_input_params\") (dkc (f4i (dkc \"flow_source\" \"two_step_verification_context\" \"device_id\" \"should_fallback_to_sms\" \"INTERNAL_INFRA_screen_id\") (dkc \"two_factor_login\" \"AWR9_ctx-abcdefghijklmnop\" \"android-0000000000000000\" false \"ap666c:3\")) (f4i (dkc \"machine_id\" \"device_id\") (dkc (drc) (dvy))))))"}},"status":"ok"}`
+
 func TestParseTwoFactorContext(t *testing.T) {
-	// The context sits in the Bloks payload as a backslash-escaped JSON pair.
-	body := []byte(`{"layout":{"bloks_payload":{"x":"\\\"two_step_verification_context\\\":\\\"AbC-123_def456ghi789jkl\\\""}}}`)
-	ctx, ok := parseTwoFactorContext(body)
-	if !ok || ctx != "AbC-123_def456ghi789jkl" {
+	ctx, ok := parseTwoFactorContext([]byte(twoFactorLoginBody))
+	if !ok || ctx != "AWR9_ctx-abcdefghijklmnop" {
 		t.Fatalf("ctx=%q ok=%v", ctx, ok)
 	}
 	if _, ok := parseTwoFactorContext([]byte(`{"no":"context here"}`)); ok {
@@ -291,48 +303,80 @@ func TestParseTwoFactorContext(t *testing.T) {
 	}
 }
 
-func TestLoginTwoFactorFlow(t *testing.T) {
-	insta, _ := newReplay(t)
-	insta.headerOptions.Store("X-Mid", "MID123")
-	var calls []map[string]any
-	paths := []string{}
-	insta.SetHTTPClient(&http.Client{Transport: handlerFunc(func(req *http.Request) (int, string) {
-		paths = append(paths, req.URL.Path)
-		var p map[string]any
-		_ = json.Unmarshal([]byte(formOf(t, req).Get("params")), &p)
-		calls = append(calls, p)
-		if strings.Contains(req.URL.Path, "has_been_allowed") {
-			return 200, buildBloksHeaders(map[string]string{
-				"IG-Set-Authorization":   "Bearer IGT:2:tok2fa",
-				"ig-set-ig-u-ds-user-id": "42865264907",
-			})
-		}
-		return 200, `{"status":"ok"}`
-	})})
+func TestLoginTwoFactor(t *testing.T) {
+	insta, err := New(Session{
+		UserID: 42865264907, Authorization: "Bearer IGT:2:old", AndroidID: "android-0000000000000000",
+		DeviceID: "00000000-0000-0000-0000-00000000dev0", FamilyDeviceID: "00000000-0000-0000-0000-00000000fam0",
+		Mid: "mid", ZCA: "zca", USDID: "usdid",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &loginServer{t: t, reqs: map[string]*http.Request{}, form: map[string]url.Values{}, twoFactor: true}
+	insta.SetHTTPClient(&http.Client{Transport: srv})
+	setTestPasswordKey(t, insta)
+	var saved []Session
+	insta.OnSessionChange = func(s Session) { saved = append(saved, s) }
 
-	insta.tfa = &twoFactorState{context: "CTX_abcdefghijklmnopqrstuv"}
+	if err := insta.Login(t.Context(), "bobby707880", "pw"); !errors.Is(err, ErrTwoFactorRequired) {
+		t.Fatalf("Login = %v, want ErrTwoFactorRequired", err)
+	}
+	if insta.header("X-Meta-Zca") == "zca" {
+		t.Error("registered attestation restored before the code step")
+	}
+	// A second Login while 2FA is pending starts over from the registered key.
+	if err := insta.Login(t.Context(), "bobby707880", "pw"); !errors.Is(err, ErrTwoFactorRequired) {
+		t.Fatalf("second Login = %v", err)
+	}
 	if err := insta.LoginTwoFactor(t.Context(), "  170664 "); err != nil {
 		t.Fatal(err)
 	}
 
-	if len(calls) != 2 || !strings.HasSuffix(paths[0], "verify_code.async/") || !strings.HasSuffix(paths[1], "has_been_allowed.async/") {
-		t.Fatalf("calls=%d paths=%v", len(calls), paths)
+	params := func(name string) (client, server map[string]any) {
+		var p map[string]map[string]any
+		if err := json.Unmarshal([]byte(srv.form[name].Get("params")), &p); err != nil {
+			t.Fatalf("%s params: %v", name, err)
+		}
+		return p["client_input_params"], p["server_params"]
 	}
-	vc, sp := calls[0]["client_input_params"].(map[string]any), calls[0]["server_params"].(map[string]any)
-	if vc["code"] != "170664" || vc["machine_id"] != "MID123" || vc["device_id"] != insta.dID {
+	mc, ms := params("method_picker")
+	if mc["selected_method"] != "totp" || ms["two_step_verification_context"] != "AWR9_ctx-abcdefghijklmnop" {
+		t.Errorf("method_picker: %v %v", mc, ms)
+	}
+	vc, vs := params("verify_code")
+	if vc["code"] != "170664" || vc["machine_id"] != "mid" || vc["device_id"] != "android-0000000000000000" {
 		t.Errorf("verify_code client params: %v", vc)
 	}
-	if sp["challenge"] != "totp" || sp["flow_source"] != "two_factor_login" || sp["two_step_verification_context"] != "CTX_abcdefghijklmnopqrstuv" {
-		t.Errorf("verify_code server params: %v", sp)
+	if vs["challenge"] != "totp" || vs["flow_source"] != "two_factor_login" || vs["two_step_verification_context"] != "AWR9_ctx-abcdefghijklmnop" {
+		t.Errorf("verify_code server params: %v", vs)
 	}
-	if _, hasCode := calls[1]["client_input_params"].(map[string]any)["code"]; hasCode {
-		t.Error("has_been_allowed must not send a code")
+	if got := srv.reqs["verify_code"].Header.Get("X-Ig-Client-Endpoint"); !strings.HasSuffix(got, "two_factor_login.enter_totp_code") {
+		t.Errorf("verify_code endpoint %q", got)
 	}
-	if insta.Session().Authorization != "Bearer IGT:2:tok2fa" || insta.Account.ID != 42865264907 {
-		t.Errorf("token not applied: %q id=%d", insta.Session().Authorization, insta.Account.ID)
+
+	s := insta.Session()
+	if s.Authorization != "Bearer IGT:2:tok2fa" || s.ZCA != "zca" || s.USDID != "usdid" {
+		t.Errorf("after 2FA: auth %q zca %q usdid %q", s.Authorization, s.ZCA, s.USDID)
 	}
 	if insta.tfa != nil {
 		t.Error("pending 2FA state not cleared")
+	}
+	if len(saved) == 0 || saved[len(saved)-1].Authorization != "Bearer IGT:2:tok2fa" || saved[len(saved)-1].ZCA != "zca" {
+		t.Errorf("OnSessionChange did not see the final session: %d calls", len(saved))
+	}
+}
+
+func TestLoginTwoFactorRejectedCode(t *testing.T) {
+	insta, _ := newReplay(t)
+	insta.tfa = &twoFactorState{context: "CTX"}
+	insta.SetHTTPClient(&http.Client{Transport: handlerFunc(func(*http.Request) (int, string) {
+		return 200, `{"layout":{"bloks_payload":{"action":"(dq8 \"error\")"}},"status":"ok"}`
+	})})
+	if err := insta.LoginTwoFactor(t.Context(), "000000"); err == nil || !strings.Contains(err.Error(), "rejected") {
+		t.Errorf("err = %v", err)
+	}
+	if insta.header("Authorization") != "Bearer IGT:2:test" {
+		t.Error("bearer changed on a rejected code")
 	}
 }
 

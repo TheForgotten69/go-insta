@@ -11,6 +11,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -22,6 +23,7 @@ import (
 func main() {
 	session := flag.String("session", "login.session.json", "session file (device fields, password key, attestation keys)")
 	user := flag.String("user", "", "username or phone")
+	logPath := flag.String("log", "", "write every response body to this file (contains the token)")
 	flag.Parse()
 
 	if *user == "" {
@@ -40,6 +42,15 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "session:", err)
 		os.Exit(1)
+	}
+	if *logPath != "" {
+		f, err := os.OpenFile(*logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "log:", err)
+			os.Exit(1)
+		}
+		defer f.Close()
+		insta.Logger = slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}
 	err = insta.Login(ctx, *user, password)
 	if errors.Is(err, goinsta.ErrTwoFactorRequired) {

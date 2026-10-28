@@ -21,8 +21,9 @@ type Session = httplog.Session
 
 // Instagram is safe for concurrent use once configured: call the Set* methods
 // (except SetProxy/UnsetProxy/SetHTTPClient, which may run at any time) before
-// sharing it. Login swaps the client into the logged-out profile, so do not run
-// other requests while it is in flight. Pagers (Timeline, Posts, ...) and the
+// sharing it. Login swaps the client's attestation headers for a throwaway
+// logged-out key until it (or LoginTwoFactor) returns, so do not run other
+// requests in between. Pagers (Timeline, Posts, ...) and the
 // Account struct belong to one goroutine each.
 type Instagram struct {
 	dID  string // android-<16 hex>
@@ -40,6 +41,7 @@ type Instagram struct {
 	c             atomic.Pointer[http.Client]
 	headerOptions sync.Map
 
+	exportMu    sync.Mutex // serializes ExportSession, which hooks may call concurrently
 	mu          sync.Mutex
 	pwPubKey    string // base64 of a PEM RSA key, from ig-set-password-encryption-pub-key
 	pwKeyID     string
@@ -186,6 +188,8 @@ func (insta *Instagram) Session() Session {
 
 // ExportSession writes the session (with the attestation private keys) mode 0600.
 func (insta *Instagram) ExportSession(path string) error {
+	insta.exportMu.Lock()
+	defer insta.exportMu.Unlock()
 	b, err := json.MarshalIndent(insta.Session(), "", "  ")
 	if err != nil {
 		return err
@@ -259,6 +263,7 @@ func sameTransport(a, b http.RoundTripper) bool {
 // fingerprints get 429. Meant for tests and custom round trippers.
 func (insta *Instagram) SetHTTPClient(client *http.Client) { insta.swapClient(client) }
 
+// SetTimeout is configure-time only: a concurrent SetProxy can undo it.
 func (insta *Instagram) SetTimeout(t time.Duration) {
 	c := *insta.client()
 	c.Timeout = t

@@ -7,3 +7,4 @@ log_http.txt
 # attestation private keys
 *.pem
 /keys/
+*.log

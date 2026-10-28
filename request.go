@@ -364,14 +364,22 @@ func (insta *Instagram) extractHeaders(h http.Header) {
 	extract("Ig-Set-Ig-U-Rur", "Ig-U-Rur")
 
 	if pk := h.Get("Ig-Set-Password-Encryption-Pub-Key"); pk != "" {
+		kid := h.Get("Ig-Set-Password-Encryption-Key-Id")
 		insta.mu.Lock()
-		insta.pwPubKey = pk
-		insta.pwKeyID = h.Get("Ig-Set-Password-Encryption-Key-Id")
+		if insta.pwPubKey != pk || insta.pwKeyID != kid {
+			insta.pwPubKey, insta.pwKeyID = pk, kid
+			changed = true
+		}
 		insta.mu.Unlock()
-		changed = true
 	}
 
-	if changed && insta.OnSessionChange != nil {
+	if changed {
+		insta.notifySessionChange()
+	}
+}
+
+func (insta *Instagram) notifySessionChange() {
+	if insta.OnSessionChange != nil {
 		insta.OnSessionChange(insta.Session())
 	}
 }

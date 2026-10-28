@@ -235,9 +235,13 @@ func TestOnSessionChange(t *testing.T) {
 	insta.extractHeaders(h) // same value, must not fire again
 	h.Set("Ig-Set-Ig-U-Rur", "rur2")
 	insta.extractHeaders(h)
+	h.Set("Ig-Set-Password-Encryption-Pub-Key", "key")
+	h.Set("Ig-Set-Password-Encryption-Key-Id", "181")
+	insta.extractHeaders(h)
+	insta.extractHeaders(h) // same key, must not fire again
 
-	if len(got) != 2 {
-		t.Fatalf("fired %d times, want 2", len(got))
+	if len(got) != 3 {
+		t.Fatalf("fired %d times, want 3", len(got))
 	}
 	if got[0].Authorization != "Bearer IGT:2:new" || got[1].Rur != "rur2" {
 		t.Errorf("payloads: %q then rur %q", got[0].Authorization, got[1].Rur)

@@ -211,7 +211,7 @@ func parseProfilePosts(insta *Instagram, body []byte, pos int) (*profilePage, er
 		return nil, err
 	}
 	raw, ok := rootField(resp.Data, "xdt_api__v1__profile_timeline")
-	if !ok {
+	if !ok || string(raw) == "null" {
 		return nil, ErrEmptyResponse
 	}
 	var tl struct {

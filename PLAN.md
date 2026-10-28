@@ -15,14 +15,10 @@ The `just` recipes below live in `~/Documents/projects/research/instagram/justfi
 
 ## Login
 
-1. **2FA** — implemented, pending live validation. **[code DONE 2026-10-28]** `TOTP(secret,t)`,
-   `ErrTwoFactorRequired`, `Login` detects 2FA and stashes the context, `LoginTwoFactor(code)` replays
-   `verify_code.async` -> `has_been_allowed.async`, and `cmd/login` prompts for the code (or reads
-   `IG_TOTP_SECRET`). Request side verified against `log_tigon_login_20261028-165404.txt`; see
-   `docs/twofactor.md`. **[you] VALIDATE LIVE**: `IG_PASSWORD=... IG_TOTP_SECRET=... go run ./cmd/login`.
-   The responses were not in the capture (request-only), so context extraction and bearer parsing are
-   best-effort with the raw response surfaced on failure — a live run confirms or reveals the exact shape.
-
+1. ~~**2FA**~~ — DONE, verified live 2026-10-28 (`cmd/login` prompted for the TOTP code, then
+   `cmd/smoke` passed 27/27 on the new session). `Login` returns `ErrTwoFactorRequired`,
+   `LoginTwoFactor(code)` replays `method_picker.navigation.async` -> `verify_code.async`;
+   `IG_TOTP_SECRET` makes `cmd/login` non-interactive. See `docs/twofactor.md`.
 
 2. **Clear login errors** — tell apart wrong password, 429, 2FA and checkpoint from the Bloks
    response instead of "no authorization token". **[you]** capture one failed login (wrong
@@ -55,8 +51,8 @@ The `just` recipes below live in `~/Documents/projects/research/instagram/justfi
 
 ## Coverage
 
-9. **Untested writes** — like, save, story like/seen, album and story upload, pin, archive, note,
-    settings changes. Only add pairs that undo themselves to `cmd/smoke -writes`. **[code]**
+9. ~~**Untested writes**~~ — DONE: like, save, story like/seen, album and story upload, pin,
+    archive, note and settings toggle all run in `cmd/smoke -writes` (51/51 live, 2026-10-28).
 10. **`Logout` untested live.** **[code]**
 11. ~~**Session persistence**~~ — DONE: `insta.OnSessionChange` fires when a rotated header is
     stored, so callers can persist without polling (verified live, 2026-10-28).
