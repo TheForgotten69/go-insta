@@ -52,5 +52,9 @@ The `just` recipes below live in `~/Documents/projects/research/instagram/justfi
 9. **Untested writes** — like, save, story like/seen, album and story upload, pin, archive, note,
     settings changes. Only add pairs that undo themselves to `cmd/smoke -writes`. **[code]**
 10. **`Logout` untested live.** **[code]**
-11. **Session persistence** — rotated `www-claim`/`rur` are saved only when the caller runs
-    `ExportSession`; consider saving automatically on change. **[code]**
+11. ~~**Session persistence**~~ — DONE: `insta.OnSessionChange` fires when a rotated header is
+    stored, so callers can persist without polling (verified live, 2026-10-28).
+
+Added 2026-10-28 (verified live): `SearchUsers` and `Collection.Posts` are now pagers;
+the all-media auto collection reads from `feed/saved/posts/`, a numbered one from
+`feed/collection/<id>/`.

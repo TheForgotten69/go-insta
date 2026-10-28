@@ -64,6 +64,9 @@ func main() {
 	if err != nil {
 		fail("session", err)
 	}
+	var rotations int
+	insta.OnSessionChange = func(goinsta.Session) { rotations++ }
+	defer func() { fmt.Printf("OnSessionChange fired %d times\n", rotations) }()
 	dir, err := os.MkdirTemp("", "smoke-")
 	if err != nil {
 		fail("tempdir", err)
@@ -149,9 +152,20 @@ func readAccount(r *runner, insta *goinsta.Instagram, dir string) {
 		}
 		return fmt.Sprintf("%d inbox items, %d likes", len(a.Items), a.Counts.Likes), nil
 	})
-	r.step("Collections", func() (string, error) {
+	r.step("Collections + Posts", func() (string, error) {
 		c, err := insta.Collections().Collect(ctx, 0)
-		return fmt.Sprintf("%d collections", len(c)), err
+		if err != nil {
+			return "", err
+		}
+		posts := 0
+		if len(c) > 0 {
+			p, err := c[0].Posts().Collect(ctx, 0)
+			if err != nil {
+				return "", err
+			}
+			posts = len(p)
+		}
+		return fmt.Sprintf("%d collections, %d posts in first", len(c), posts), nil
 	})
 }
 
@@ -222,20 +236,20 @@ func readFeeds(r *runner, insta *goinsta.Instagram) *goinsta.Item {
 func readUser(r *runner, insta *goinsta.Instagram, target, dir string) *goinsta.User {
 	ctx := r.ctx
 	var user *goinsta.User
-	r.step("SearchUsers", func() (string, error) {
-		res, err := insta.SearchUsers(ctx, target)
+	r.step("SearchUsers (2 pages)", func() (string, error) {
+		users, err := insta.SearchUsers(target).Collect(ctx, 40)
 		if err != nil {
 			return "", err
 		}
-		for _, u := range res.Users {
+		for _, u := range users {
 			if u.Username == target {
 				user = u
 			}
 		}
 		if user == nil {
-			return "", fmt.Errorf("@%s not among %d results", target, len(res.Users))
+			return "", fmt.Errorf("@%s not among %d results", target, len(users))
 		}
-		return fmt.Sprintf("%d results", len(res.Users)), nil
+		return fmt.Sprintf("%d results", len(users)), nil
 	})
 	if user == nil {
 		return nil

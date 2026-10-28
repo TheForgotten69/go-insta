@@ -634,19 +634,19 @@ func TestSearchAndFollowLists(t *testing.T) {
 	insta, r := newReplay(t, "account_serp", "info_stream_search", "followers_list", "following_list",
 		"following_list_page", "info_stream_following", "show_many")
 	serp := fixture(t, "account_serp")
-	res, err := insta.SearchUsers(t.Context(), serp.Query["query"])
-	if err != nil {
+	search := insta.SearchUsers(serp.Query["query"])
+	if err := search.Next(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, serp, r.sent[0])
 	var target *User
-	for _, u := range res.Users {
+	for _, u := range search.Items {
 		if u.ID == 4213518589 {
 			target = u
 		}
 	}
 	if target == nil {
-		t.Fatalf("searched user missing among %d", len(res.Users))
+		t.Fatalf("searched user missing among %d", len(search.Items))
 	}
 	if err := target.Sync(t.Context()); err != nil {
 		t.Fatal(err)

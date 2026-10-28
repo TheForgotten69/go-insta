@@ -1,8 +1,14 @@
 package goinsta
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"strings"
+)
 
 type Collection struct {
+	insta *Instagram
+
 	ID         string `json:"collection_id"`
 	MediaCount int    `json:"collection_media_count"`
 	Name       string `json:"collection_name"`
@@ -14,6 +20,48 @@ type Collection struct {
 		OriginalHeight int       `json:"original_height"`
 		MediaType      MediaType `json:"media_type"`
 	} `json:"cover_media"`
+}
+
+// IsAuto reports whether this is one of Instagram's automatic collections (such
+// as the all-media collection), which are read from a different endpoint than a
+// user-created one.
+func (c *Collection) IsAuto() bool { return strings.HasSuffix(c.Type, "AUTO_COLLECTION") }
+
+// Posts pages the saved media in the collection.
+func (c *Collection) Posts() *Pager[*Item] {
+	endpoint := fmt.Sprintf(urlCollectionFeed, c.ID)
+	if c.IsAuto() {
+		endpoint = urlSavedFeed
+	}
+	var nextID string
+	var pos int
+	return newPager(func(ctx context.Context) ([]*Item, bool, error) {
+		q := map[string]string{}
+		if nextID != "" {
+			q["max_id"] = nextID
+		}
+		var resp struct {
+			Items []struct {
+				Media *Item `json:"media"`
+			} `json:"items"`
+			MoreAvailable bool   `json:"more_available"`
+			NextID        string `json:"next_max_id"`
+		}
+		if err := c.insta.callJSON(ctx, &reqOptions{Endpoint: endpoint, Query: q}, &resp); err != nil {
+			return nil, false, err
+		}
+		nextID = resp.NextID
+		items := make([]*Item, 0, len(resp.Items))
+		for _, it := range resp.Items {
+			if it.Media != nil {
+				setToItem(it.Media, c.insta, "collection_feed")
+				it.Media.Index = pos
+				pos++
+				items = append(items, it.Media)
+			}
+		}
+		return items, resp.MoreAvailable && nextID != "", nil
+	})
 }
 
 func (insta *Instagram) Collections() *Pager[*Collection] {
@@ -34,6 +82,9 @@ func (insta *Instagram) Collections() *Pager[*Collection] {
 			return nil, false, err
 		}
 		nextID = resp.NextID
+		for _, c := range resp.Items {
+			c.insta = insta
+		}
 		return resp.Items, resp.MoreAvailable && nextID != "", nil
 	})
 }

@@ -36,11 +36,12 @@ item, err := insta.UploadAlbum(ctx, photos, goinsta.PostOptions{Caption: "hi"})
 paths, err := item.DownloadTo(ctx, "out/")
 ```
 
-Pagers: `Timeline()`, `Reels()`, `Collections()`, `Activity()`,
-`User.Posts/Followers/Following()`, `Item.Comments()`.
+Pagers: `Timeline()`, `Reels()`, `Collections()`, `Activity()`, `SearchUsers()`,
+`User.Posts/Followers/Following()`, `Item.Comments()`, `Collection.Posts()`.
 
 One `*Instagram` can be shared across goroutines; each pager belongs to one.
 `Login` must not overlap other requests. Rate-limit waits and, at debug level,
 every response body go to `insta.Logger` (an `*slog.Logger`, default `slog.Default()`).
+Set `insta.OnSessionChange` to persist the session when the server rotates a header.
 
 `PLAN.md` tracks the remaining work.

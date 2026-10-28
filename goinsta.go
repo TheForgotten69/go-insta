@@ -52,6 +52,11 @@ type Instagram struct {
 	// Logger receives rate-limit warnings and, at debug level, every response
 	// body. It defaults to slog.Default().
 	Logger *slog.Logger
+	// OnSessionChange, if set, is called when the server rotates a stored header
+	// (token, mid, www-claim, rur, password key), so a caller can persist the
+	// session without polling. It runs on the request goroutine; keep it quick
+	// and do not call back into the same client from it.
+	OnSessionChange func(Session)
 	// RateLimitWait is how long a 429 is waited out before retrying (up to 3
 	// times); 0 returns ErrTooManyRequests at once.
 	RateLimitWait time.Duration

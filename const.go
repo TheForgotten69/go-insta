@@ -83,6 +83,8 @@ const (
 	urlActivityRecent  = "news/inbox/"
 	urlActivitySeen    = "news/inbox_seen/"
 	urlCollectionsList = "collections/list/"
+	urlCollectionFeed  = "feed/collection/%s/" // numbered collection; verified live
+	urlSavedFeed       = "feed/saved/posts/"   // the all-media auto collection
 
 	urlCreateNote = "media/create_note/v2/"
 

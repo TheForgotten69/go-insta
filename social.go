@@ -27,49 +27,42 @@ func (insta *Instagram) usersFrom(users []*User, entry entryContext) []*User {
 	return users
 }
 
-type SearchResult struct {
-	Users     []*User
-	HasMore   bool
-	RankToken string
-	PageToken string
-}
-
-// SearchUsers is the "Accounts" tab of the search results page.
-func (insta *Instagram) SearchUsers(ctx context.Context, query string) (*SearchResult, error) {
+// SearchUsers pages the "Accounts" tab of search. The session ids stay fixed
+// across pages, as the app keeps them; later pages carry the server's page_token.
+func (insta *Instagram) SearchUsers(query string) *Pager[*User] {
 	serpSession := generateUUID()
-	var resp struct {
-		Users     []*User `json:"users"`
-		HasMore   bool    `json:"has_more"`
-		RankToken string  `json:"rank_token"`
-		PageToken string  `json:"page_token"`
-	}
-	err := insta.callJSON(ctx, &reqOptions{
-		Endpoint: urlAccountSerp,
-		Query: map[string]string{
+	searchSession := generateUUID()
+	var pageToken string
+	return newPager(func(ctx context.Context) ([]*User, bool, error) {
+		q := map[string]string{
 			"search_surface":  "user_serp",
 			"serp_session_id": serpSession,
 			"qpl_join_id":     serpSession,
 			"session_state":   "typeahead",
 			"disable_ads":     "true",
 			"enable_lightweight_query_with_basic_mmc_and_media_grid": "true",
-			"search_session_id": generateUUID(),
+			"search_session_id": searchSession,
 			"timezone_offset":   insta.sess.TimezoneOffset,
 			"enable_metadata":   "false",
 			"serp_origination":  "keyboard",
 			"keyword_context":   "null",
 			"count":             "30",
 			"query":             query,
-		},
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-	return &SearchResult{
-		Users:     insta.usersFrom(resp.Users, entrySearch),
-		HasMore:   resp.HasMore,
-		RankToken: resp.RankToken,
-		PageToken: resp.PageToken,
-	}, nil
+		}
+		if pageToken != "" {
+			q["page_token"] = pageToken
+		}
+		var resp struct {
+			Users     []*User `json:"users"`
+			HasMore   bool    `json:"has_more"`
+			PageToken string  `json:"page_token"`
+		}
+		if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlAccountSerp, Query: q}, &resp); err != nil {
+			return nil, false, err
+		}
+		pageToken = resp.PageToken
+		return insta.usersFrom(resp.Users, entrySearch), resp.HasMore && pageToken != "", nil
+	})
 }
 
 // gqlUser is the XDTUserDict shape: id instead of pk, aliased fields.

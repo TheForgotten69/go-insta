@@ -344,9 +344,15 @@ func lastNDJSONLine(b []byte) []byte {
 }
 
 func (insta *Instagram) extractHeaders(h http.Header) {
+	changed := false
 	extract := func(in, out string) {
-		if v := h.Get(in); v != "" {
+		v := h.Get(in)
+		if v == "" {
+			return
+		}
+		if old, ok := insta.headerOptions.Load(out); !ok || old.(string) != v {
 			insta.headerOptions.Store(out, v)
+			changed = true
 		}
 	}
 	extract("Ig-Set-Authorization", "Authorization")
@@ -362,6 +368,11 @@ func (insta *Instagram) extractHeaders(h http.Header) {
 		insta.pwPubKey = pk
 		insta.pwKeyID = h.Get("Ig-Set-Password-Encryption-Key-Id")
 		insta.mu.Unlock()
+		changed = true
+	}
+
+	if changed && insta.OnSessionChange != nil {
+		insta.OnSessionChange(insta.Session())
 	}
 }
 

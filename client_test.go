@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -220,5 +221,87 @@ func TestPostsPagingSendsCursor(t *testing.T) {
 	}
 	if _, has := vars[0]["max_id"]; has {
 		t.Error("first page sent max_id")
+	}
+}
+
+func TestOnSessionChange(t *testing.T) {
+	insta, _ := newReplay(t)
+	var got []Session
+	insta.OnSessionChange = func(s Session) { got = append(got, s) }
+
+	h := http.Header{}
+	h.Set("Ig-Set-Authorization", "Bearer IGT:2:new")
+	insta.extractHeaders(h)
+	insta.extractHeaders(h) // same value, must not fire again
+	h.Set("Ig-Set-Ig-U-Rur", "rur2")
+	insta.extractHeaders(h)
+
+	if len(got) != 2 {
+		t.Fatalf("fired %d times, want 2", len(got))
+	}
+	if got[0].Authorization != "Bearer IGT:2:new" || got[1].Rur != "rur2" {
+		t.Errorf("payloads: %q then rur %q", got[0].Authorization, got[1].Rur)
+	}
+}
+
+func TestSearchUsersPaging(t *testing.T) {
+	insta, _ := newReplay(t)
+	var tokens []string
+	insta.SetHTTPClient(&http.Client{Transport: handlerFunc(func(req *http.Request) (int, string) {
+		tokens = append(tokens, req.URL.Query().Get("page_token"))
+		more := len(tokens) == 1
+		id := len(tokens)
+		return 200, fmt.Sprintf(`{"users":[{"pk":%d,"username":"u%d"}],"has_more":%v,"page_token":"T%d"}`, id, id, more, id)
+	})})
+	users, err := insta.SearchUsers("x").Collect(t.Context(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 2 || users[1].Username != "u2" || users[0].entry != entrySearch {
+		t.Fatalf("users %+v", users)
+	}
+	if tokens[0] != "" || tokens[1] != "T1" {
+		t.Errorf("page tokens sent: %q", tokens)
+	}
+}
+
+func TestCollectionPosts(t *testing.T) {
+	insta, _ := newReplay(t)
+	insta.SetHTTPClient(&http.Client{Transport: handlerFunc(func(req *http.Request) (int, string) {
+		if !strings.Contains(req.URL.Path, "/feed/collection/42/") {
+			return 404, "{}"
+		}
+		max := req.URL.Query().Get("max_id")
+		if max == "" {
+			return 200, `{"items":[{"media":{"id":"1_1","pk":1}}],"more_available":true,"next_max_id":"N"}`
+		}
+		return 200, `{"items":[{"media":{"id":"2_2","pk":2}}],"more_available":false}`
+	})})
+	c := &Collection{insta: insta, ID: "42"}
+	items, err := c.Posts().Collect(t.Context(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].ID != "1_1" || items[1].Index != 1 || items[0].insta != insta {
+		t.Fatalf("items %+v", items)
+	}
+}
+
+func TestCollectionPostsAutoRoute(t *testing.T) {
+	insta, _ := newReplay(t)
+	var path string
+	insta.SetHTTPClient(&http.Client{Transport: handlerFunc(func(req *http.Request) (int, string) {
+		path = req.URL.Path
+		return 200, `{"items":[],"more_available":false}`
+	})})
+	auto := &Collection{insta: insta, ID: "ALL_MEDIA_AUTO_COLLECTION", Type: "ALL_MEDIA_AUTO_COLLECTION"}
+	if !auto.IsAuto() {
+		t.Fatal("auto collection not detected")
+	}
+	if _, err := auto.Posts().Collect(t.Context(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if path != "/api/v1/feed/saved/posts/" {
+		t.Errorf("auto collection hit %q", path)
 	}
 }
