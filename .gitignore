@@ -1,0 +1,9 @@
+log_http.txt
+*.har
+/.idea/
+*.session.json
+/session*.json
+
+# attestation private keys
+*.pem
+/keys/
