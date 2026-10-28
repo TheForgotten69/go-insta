@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"time"
 
-	"go-insta/internal/httplog"
+	"github.com/TheForgotten69/go-insta/internal/httplog"
 )
 
 // Attestation reproduces the x-meta-zca and x-meta-usdid headers the app signs

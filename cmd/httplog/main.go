@@ -14,7 +14,7 @@ import (
 	"sort"
 	"strings"
 
-	"go-insta/internal/httplog"
+	"github.com/TheForgotten69/go-insta/internal/httplog"
 )
 
 func main() {

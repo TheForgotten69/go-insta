@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	goinsta "go-insta"
+	goinsta "github.com/TheForgotten69/go-insta"
 )
 
 func main() {

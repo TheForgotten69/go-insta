@@ -21,7 +21,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"go-insta/internal/httplog"
+	"github.com/TheForgotten69/go-insta/internal/httplog"
 )
 
 var (

@@ -18,7 +18,7 @@ import (
 	"os/signal"
 	"time"
 
-	goinsta "go-insta"
+	goinsta "github.com/TheForgotten69/go-insta"
 )
 
 type runner struct {

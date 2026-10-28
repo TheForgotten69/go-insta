@@ -4,6 +4,10 @@ Private Instagram Android API client (app 453.0.0.55.79), rebuilt from device
 captures on top of [Davincible/goinsta](https://github.com/Davincible/goinsta).
 Requests replay the app's TLS fingerprint, headers and attestation.
 
+```sh
+go get github.com/TheForgotten69/go-insta
+```
+
 ## Session
 
 A session file holds the device ids, token, password key and the attestation

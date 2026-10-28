@@ -1,4 +1,4 @@
-module go-insta
+module github.com/TheForgotten69/go-insta
 
 go 1.26.0
 

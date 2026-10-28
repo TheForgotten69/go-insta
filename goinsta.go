@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go-insta/internal/httplog"
+	"github.com/TheForgotten69/go-insta/internal/httplog"
 )
 
 // Session: generate with `httplog session log_http.txt > session.json`.
