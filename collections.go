@@ -35,7 +35,7 @@ func (c *Collection) Posts() *Pager[*Item] {
 	}
 	var nextID string
 	var pos int
-	return newPager(func(ctx context.Context) ([]*Item, bool, error) {
+	return newPager(func(ctx context.Context) ([]*Item, string, error) {
 		q := map[string]string{}
 		if nextID != "" {
 			q["max_id"] = nextID
@@ -48,7 +48,7 @@ func (c *Collection) Posts() *Pager[*Item] {
 			NextID        string `json:"next_max_id"`
 		}
 		if err := c.insta.callJSON(ctx, &reqOptions{Endpoint: endpoint, Query: q}, &resp); err != nil {
-			return nil, false, err
+			return nil, "", err
 		}
 		nextID = resp.NextID
 		items := make([]*Item, 0, len(resp.Items))
@@ -60,13 +60,13 @@ func (c *Collection) Posts() *Pager[*Item] {
 				items = append(items, it.Media)
 			}
 		}
-		return items, resp.MoreAvailable && nextID != "", nil
+		return items, cursorIf(resp.MoreAvailable, nextID), nil
 	})
 }
 
 func (insta *Instagram) Collections() *Pager[*Collection] {
 	var nextID string
-	return newPager(func(ctx context.Context) ([]*Collection, bool, error) {
+	return newPager(func(ctx context.Context) ([]*Collection, string, error) {
 		query := map[string]string{
 			"collection_types": `["ALL_MEDIA_AUTO_COLLECTION","PRODUCT_AUTO_COLLECTION","EMPTY_PRODUCT_AUTO_COLLECTION","MEDIA","AUDIO_AUTO_COLLECTION","SERIES_AUTO_COLLECTION","LONGFORM_AUTO_COLLECTION","LOCATIONS_AUTO_COLLECTION","NEW_COLLECTION"]`,
 		}
@@ -79,12 +79,12 @@ func (insta *Instagram) Collections() *Pager[*Collection] {
 			NextID        string        `json:"next_max_id"`
 		}
 		if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlCollectionsList, Query: query}, &resp); err != nil {
-			return nil, false, err
+			return nil, "", err
 		}
 		nextID = resp.NextID
 		for _, c := range resp.Items {
 			c.insta = insta
 		}
-		return resp.Items, resp.MoreAvailable && nextID != "", nil
+		return resp.Items, cursorIf(resp.MoreAvailable, nextID), nil
 	})
 }

@@ -33,7 +33,7 @@ func (insta *Instagram) SearchUsers(query string) *Pager[*User] {
 	serpSession := generateUUID()
 	searchSession := generateUUID()
 	var pageToken string
-	return newPager(func(ctx context.Context) ([]*User, bool, error) {
+	return newPager(func(ctx context.Context) ([]*User, string, error) {
 		q := map[string]string{
 			"search_surface":  "user_serp",
 			"serp_session_id": serpSession,
@@ -58,10 +58,10 @@ func (insta *Instagram) SearchUsers(query string) *Pager[*User] {
 			PageToken string  `json:"page_token"`
 		}
 		if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlAccountSerp, Query: q}, &resp); err != nil {
-			return nil, false, err
+			return nil, "", err
 		}
 		pageToken = resp.PageToken
-		return insta.usersFrom(resp.Users, entrySearch), resp.HasMore && pageToken != "", nil
+		return insta.usersFrom(resp.Users, entrySearch), cursorIf(resp.HasMore, pageToken), nil
 	})
 }
 
@@ -138,24 +138,24 @@ func followingVars(id Int64) map[string]any {
 func (user *User) followList(friendly, doc, root string, entry entryContext, varsFor func(Int64) map[string]any) *Pager[*User] {
 	insta := user.insta
 	var maxID string
-	return newPager(func(ctx context.Context) ([]*User, bool, error) {
+	return newPager(func(ctx context.Context) ([]*User, string, error) {
 		vars := varsFor(user.ID)
 		if maxID != "" {
 			vars["max_id"] = maxID
 		}
 		body, err := insta.graphQL(ctx, friendly, doc, root, "", vars)
 		if err != nil {
-			return nil, false, err
+			return nil, "", err
 		}
 		var resp struct {
 			Data map[string]json.RawMessage `json:"data"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
-			return nil, false, err
+			return nil, "", err
 		}
 		raw, ok := rootField(resp.Data, root)
 		if !ok || string(raw) == "null" {
-			return nil, false, fmt.Errorf("%s: %w", friendly, ErrEmptyResponse)
+			return nil, "", fmt.Errorf("%s: %w", friendly, ErrEmptyResponse)
 		}
 		var list struct {
 			Users     []gqlUser `json:"users"`
@@ -163,7 +163,7 @@ func (user *User) followList(friendly, doc, root string, entry entryContext, var
 			NextMaxID *string   `json:"next_max_id"`
 		}
 		if err := json.Unmarshal(raw, &list); err != nil {
-			return nil, false, err
+			return nil, "", err
 		}
 		maxID = ""
 		if list.NextMaxID != nil {
@@ -177,7 +177,7 @@ func (user *User) followList(friendly, doc, root string, entry entryContext, var
 				LatestReelMedia: g.LatestReelMedia, Friendship: g.Friendship,
 			}
 		}
-		return insta.usersFrom(users, entry), list.HasMore && maxID != "", nil
+		return insta.usersFrom(users, entry), cursorIf(list.HasMore, maxID), nil
 	})
 }
 

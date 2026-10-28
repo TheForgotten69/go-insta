@@ -10,7 +10,7 @@ func (insta *Instagram) Reels() *Pager[*Item] {
 	sessionID := generateUUID()
 	var maxID string
 	var pos int
-	return newPager(func(ctx context.Context) ([]*Item, bool, error) {
+	return newPager(func(ctx context.Context) ([]*Item, string, error) {
 		q := map[string]string{
 			"_uuid":                         insta.uuid,
 			"container_module":              "clips_viewer_clips_tab",
@@ -50,7 +50,7 @@ func (insta *Instagram) Reels() *Pager[*Item] {
 			},
 		}, &resp)
 		if err != nil {
-			return nil, false, err
+			return nil, "", err
 		}
 		maxID = resp.Paging.MaxID
 		items := make([]*Item, 0, len(resp.Items))
@@ -62,7 +62,7 @@ func (insta *Instagram) Reels() *Pager[*Item] {
 				items = append(items, it.Media)
 			}
 		}
-		return items, resp.Paging.MoreAvailable && maxID != "", nil
+		return items, cursorIf(resp.Paging.MoreAvailable, maxID), nil
 	})
 }
 

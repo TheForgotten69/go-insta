@@ -154,7 +154,7 @@ func rootField(data map[string]json.RawMessage, name string) (json.RawMessage, b
 func (user *User) Posts() *Pager[*Item] {
 	var maxID, cursor string
 	var pos int
-	return newPager(func(ctx context.Context) ([]*Item, bool, error) {
+	return newPager(func(ctx context.Context) ([]*Item, string, error) {
 		vars := profileTimelineVars(user.ID)
 		if maxID != "" {
 			vars["max_id"] = maxID
@@ -164,15 +164,15 @@ func (user *User) Posts() *Pager[*Item] {
 		}
 		body, err := user.insta.graphQL(ctx, "IGProfileTimelineQuery", docProfileTimeline, "xdt_api__v1__profile_timeline", "fetch", vars)
 		if err != nil {
-			return nil, false, err
+			return nil, "", err
 		}
 		page, err := parseProfilePosts(user.insta, body, pos)
 		if err != nil {
-			return nil, false, err
+			return nil, "", err
 		}
 		maxID, cursor = page.nextMaxID, page.gridCursor
 		pos += len(page.items)
-		return page.items, page.more && maxID != "", nil
+		return page.items, cursorIf(page.more, maxID), nil
 	})
 }
 

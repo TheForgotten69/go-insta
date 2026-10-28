@@ -119,7 +119,7 @@ func (item *Item) Comments() *Comments {
 	return c
 }
 
-func (c *Comments) fetch(ctx context.Context) ([]*Comment, bool, error) {
+func (c *Comments) fetch(ctx context.Context) ([]*Comment, string, error) {
 	item := c.item
 	q := map[string]string{
 		"can_support_threading":              "true",
@@ -144,13 +144,13 @@ func (c *Comments) fetch(ctx context.Context) ([]*Comment, bool, error) {
 		Query:    q,
 	}, &page)
 	if err != nil {
-		return nil, false, err
+		return nil, "", err
 	}
 	for _, cm := range page.Items {
 		cm.setValues(item)
 	}
 	c.Count, c.Caption, c.minID = page.CommentCount, page.Caption, page.NextMinID
-	return page.Items, page.HasMoreHeadloadComments && page.NextMinID != "", nil
+	return page.Items, cursorIf(page.HasMoreHeadloadComments, page.NextMinID), nil
 }
 
 func (c *Comment) likePayload() (map[string]string, error) {

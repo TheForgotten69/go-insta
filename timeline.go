@@ -58,7 +58,7 @@ type feedCache struct {
 
 func (insta *Instagram) Timeline() *Timeline {
 	tl := &Timeline{insta: insta}
-	tl.Pager = newPager(func(ctx context.Context) ([]*Item, bool, error) {
+	tl.Pager = newPager(func(ctx context.Context) ([]*Item, string, error) {
 		reason := "cold_start_fetch"
 		if tl.started {
 			reason = "pagination"
@@ -70,15 +70,15 @@ func (insta *Instagram) Timeline() *Timeline {
 
 func (tl *Timeline) Refresh(ctx context.Context) error {
 	tl.pos, tl.nextID = 0, ""
-	items, more, err := tl.fetch(ctx, "auto_refresh")
+	items, next, err := tl.fetch(ctx, "auto_refresh")
 	if err != nil {
 		return err
 	}
-	tl.Items, tl.done = items, !more
+	tl.Items, tl.done, tl.cursor = items, next == "", next
 	return nil
 }
 
-func (tl *Timeline) fetch(ctx context.Context, reason string) ([]*Item, bool, error) {
+func (tl *Timeline) fetch(ctx context.Context, reason string) ([]*Item, string, error) {
 	insta := tl.insta
 	now := time.Now()
 	q := map[string]string{
@@ -135,12 +135,12 @@ func (tl *Timeline) fetch(ctx context.Context, reason string) ([]*Item, bool, er
 		ExtraHeaders: mergeForms(headers, map[string]string{"X-Ig-Tail-Load-Request": tail}),
 	})
 	if err != nil {
-		return nil, false, err
+		return nil, "", err
 	}
 
 	var page feedCache
 	if err := json.Unmarshal(body, &page); err != nil {
-		return nil, false, err
+		return nil, "", err
 	}
 	tl.started = true
 	tl.nextID = page.NextID
@@ -157,7 +157,7 @@ func (tl *Timeline) fetch(ctx context.Context, reason string) ([]*Item, bool, er
 			items = append(items, item)
 		}
 	}
-	return items, page.MoreAvailable && page.NextID != "", nil
+	return items, cursorIf(page.MoreAvailable, page.NextID), nil
 }
 
 type TrayReason string

@@ -3,15 +3,16 @@ package goinsta
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 )
 
 func countingPager(pages ...[]int) (*Pager[int], *int) {
 	calls := 0
-	return newPager(func(context.Context) ([]int, bool, error) {
+	return newPager(func(context.Context) ([]int, string, error) {
 		p := pages[calls]
 		calls++
-		return p, calls < len(pages), nil
+		return p, cursorIf(calls < len(pages), fmt.Sprint("c", calls)), nil
 	}), &calls
 }
 
@@ -42,7 +43,7 @@ func TestPagerCollectStopsEarly(t *testing.T) {
 
 func TestPagerYieldsError(t *testing.T) {
 	boom := errors.New("boom")
-	p := newPager(func(context.Context) ([]int, bool, error) { return nil, false, boom })
+	p := newPager(func(context.Context) ([]int, string, error) { return nil, "", boom })
 	seen := 0
 	for _, err := range p.All(t.Context()) {
 		seen++
@@ -52,5 +53,17 @@ func TestPagerYieldsError(t *testing.T) {
 	}
 	if seen != 1 {
 		t.Errorf("yielded %d times, want the error once", seen)
+	}
+}
+
+func TestPagerStopsOnRepeatedCursor(t *testing.T) {
+	calls := 0
+	p := newPager(func(context.Context) ([]int, string, error) {
+		calls++
+		return []int{calls}, "same", nil
+	})
+	got, err := p.Collect(t.Context(), 0)
+	if err != nil || len(got) != 2 || calls != 2 {
+		t.Errorf("got %v err %v after %d calls, want 2 pages", got, err, calls)
 	}
 }

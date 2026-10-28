@@ -16,12 +16,23 @@ import (
 type Pager[T any] struct {
 	Items []T
 
-	done  bool
-	fetch func(ctx context.Context) (items []T, more bool, err error)
+	done   bool
+	cursor string
+	// fetch loads the page after the current one and returns the cursor of the
+	// next, or "" on the last page.
+	fetch func(ctx context.Context) (items []T, next string, err error)
 }
 
-func newPager[T any](fetch func(ctx context.Context) ([]T, bool, error)) *Pager[T] {
+func newPager[T any](fetch func(ctx context.Context) ([]T, string, error)) *Pager[T] {
 	return &Pager[T]{fetch: fetch}
+}
+
+// cursorIf returns cursor when the server says more pages follow, else "".
+func cursorIf(more bool, cursor string) string {
+	if more {
+		return cursor
+	}
+	return ""
 }
 
 func (p *Pager[T]) More() bool { return !p.done }
@@ -30,11 +41,12 @@ func (p *Pager[T]) Next(ctx context.Context) error {
 	if p.done {
 		return ErrNoMore
 	}
-	items, more, err := p.fetch(ctx)
+	items, next, err := p.fetch(ctx)
 	if err != nil {
 		return err
 	}
-	p.Items, p.done = items, !more
+	// A server that hands back the same cursor would otherwise be polled forever.
+	p.Items, p.done, p.cursor = items, next == "" || next == p.cursor, next
 	return nil
 }
 

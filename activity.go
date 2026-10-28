@@ -73,7 +73,7 @@ type RecentItems struct {
 func (insta *Instagram) Activity() *Activity {
 	act := &Activity{}
 	var last *activityPage
-	act.Pager = newPager(func(ctx context.Context) ([]RecentItems, bool, error) {
+	act.Pager = newPager(func(ctx context.Context) ([]RecentItems, string, error) {
 		query := map[string]string{
 			"could_truncate_feed": "true",
 			"mark_as_seen":        "false",
@@ -89,15 +89,15 @@ func (insta *Instagram) Activity() *Activity {
 		}
 		var page activityPage
 		if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlActivityRecent, Query: query}, &page); err != nil {
-			return nil, false, err
+			return nil, "", err
 		}
 		if last == nil {
 			if err := insta.MarkActivitySeen(ctx); err != nil {
-				return nil, false, err
+				return nil, "", err
 			}
 		}
 		last, act.Counts = &page, page.Counts
-		return append(page.NewStories, page.OldStories...), page.NextID != "", nil
+		return append(page.NewStories, page.OldStories...), page.NextID, nil
 	})
 	return act
 }
