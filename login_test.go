@@ -278,3 +278,67 @@ func TestReloginUsesLoggedOutProfile(t *testing.T) {
 		t.Error("throwaway login key still signing")
 	}
 }
+
+func TestParseTwoFactorContext(t *testing.T) {
+	// The context sits in the Bloks payload as a backslash-escaped JSON pair.
+	body := []byte(`{"layout":{"bloks_payload":{"x":"\\\"two_step_verification_context\\\":\\\"AbC-123_def456ghi789jkl\\\""}}}`)
+	ctx, ok := parseTwoFactorContext(body)
+	if !ok || ctx != "AbC-123_def456ghi789jkl" {
+		t.Fatalf("ctx=%q ok=%v", ctx, ok)
+	}
+	if _, ok := parseTwoFactorContext([]byte(`{"no":"context here"}`)); ok {
+		t.Error("matched a body with no context")
+	}
+}
+
+func TestLoginTwoFactorFlow(t *testing.T) {
+	insta, _ := newReplay(t)
+	insta.headerOptions.Store("X-Mid", "MID123")
+	var calls []map[string]any
+	paths := []string{}
+	insta.SetHTTPClient(&http.Client{Transport: handlerFunc(func(req *http.Request) (int, string) {
+		paths = append(paths, req.URL.Path)
+		var p map[string]any
+		_ = json.Unmarshal([]byte(formOf(t, req).Get("params")), &p)
+		calls = append(calls, p)
+		if strings.Contains(req.URL.Path, "has_been_allowed") {
+			return 200, buildBloksHeaders(map[string]string{
+				"IG-Set-Authorization":   "Bearer IGT:2:tok2fa",
+				"ig-set-ig-u-ds-user-id": "42865264907",
+			})
+		}
+		return 200, `{"status":"ok"}`
+	})})
+
+	insta.tfa = &twoFactorState{context: "CTX_abcdefghijklmnopqrstuv"}
+	if err := insta.LoginTwoFactor(t.Context(), "  170664 "); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(calls) != 2 || !strings.HasSuffix(paths[0], "verify_code.async/") || !strings.HasSuffix(paths[1], "has_been_allowed.async/") {
+		t.Fatalf("calls=%d paths=%v", len(calls), paths)
+	}
+	vc, sp := calls[0]["client_input_params"].(map[string]any), calls[0]["server_params"].(map[string]any)
+	if vc["code"] != "170664" || vc["machine_id"] != "MID123" || vc["device_id"] != insta.dID {
+		t.Errorf("verify_code client params: %v", vc)
+	}
+	if sp["challenge"] != "totp" || sp["flow_source"] != "two_factor_login" || sp["two_step_verification_context"] != "CTX_abcdefghijklmnopqrstuv" {
+		t.Errorf("verify_code server params: %v", sp)
+	}
+	if _, hasCode := calls[1]["client_input_params"].(map[string]any)["code"]; hasCode {
+		t.Error("has_been_allowed must not send a code")
+	}
+	if insta.Session().Authorization != "Bearer IGT:2:tok2fa" || insta.Account.ID != 42865264907 {
+		t.Errorf("token not applied: %q id=%d", insta.Session().Authorization, insta.Account.ID)
+	}
+	if insta.tfa != nil {
+		t.Error("pending 2FA state not cleared")
+	}
+}
+
+func TestLoginTwoFactorNoPending(t *testing.T) {
+	insta, _ := newReplay(t)
+	if err := insta.LoginTwoFactor(t.Context(), "123456"); err == nil {
+		t.Error("expected error with no pending 2FA login")
+	}
+}

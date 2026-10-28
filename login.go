@@ -4,12 +4,26 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
+
+// errNoBearer is applyLoginResponse's signal that a login response carried no
+// token, so the caller can tell 2FA/checkpoint apart from success.
+var errNoBearer = errors.New("login response carried no authorization token")
+
+// twoFactorState bridges Login (password accepted, 2FA required) and
+// LoginTwoFactor (code submitted).
+type twoFactorState struct {
+	context string       // two_step_verification_context from the send_login response
+	raw     string       // the raw send_login response, shown if context is missing
+	restore func() error // restores the pre-login attestation, deferred to the code step
+}
 
 const (
 	// The logged-out CAA flow runs on the auth host.
@@ -36,7 +50,48 @@ type loginFlow struct {
 // Login replays the app's logged-out password login: register a fresh zca key
 // (challenge nonce), render the login context (aac), then send the credentials.
 // The attestation headers in use before the call are restored afterwards.
+//
+// When the account has two-factor on, Login returns ErrTwoFactorRequired; call
+// LoginTwoFactor with a TOTP code to finish. The logged-out attestation stays
+// applied until then, so do not make other requests in between.
 func (insta *Instagram) Login(ctx context.Context, username, password string) (err error) {
+	lo, restore, err := insta.applyLoginAttestation()
+	if err != nil {
+		return err
+	}
+	restoreNow := true
+	defer func() {
+		if restoreNow {
+			if rerr := restore(); rerr != nil && err == nil {
+				err = rerr
+			}
+		}
+	}()
+
+	flow := &loginFlow{waterfallID: generateUUID(), inputPrefix: bloksInstanceID()}
+	if flow.challengeNonce, err = insta.createKeystore(ctx, lo.keyHash); err != nil {
+		return fmt.Errorf("create_android_keystore: %w", err)
+	}
+	if flow.aac, err = insta.fetchAAC(ctx, flow.waterfallID); err != nil {
+		return fmt.Errorf("process_client_data_and_redirect: %w", err)
+	}
+	err = insta.sendLogin(ctx, username, password, flow)
+	if errors.Is(err, ErrTwoFactorRequired) {
+		// Hand the attestation restore to LoginTwoFactor, which runs the next
+		// calls under the same logged-out key.
+		insta.mu.Lock()
+		if insta.tfa != nil {
+			insta.tfa.restore = restore
+		}
+		insta.mu.Unlock()
+		restoreNow = false
+	}
+	return err
+}
+
+// applyLoginAttestation swaps in a fresh never-uploaded zca key for the logged-out
+// flow and returns a restore that puts the prior attestation back.
+func (insta *Instagram) applyLoginAttestation() (lo *Attestation, restore func() error, err error) {
 	insta.mu.Lock()
 	registered, prevAtt, prevSigned := insta.att, insta.curAtt, insta.attSignedAt
 	insta.mu.Unlock()
@@ -46,35 +101,27 @@ func (insta *Instagram) Login(ctx context.Context, username, password string) (e
 	if base == nil {
 		base = &Attestation{BatteryLevel: 85, BatteryState: "Charging"}
 	}
-	lo, err := base.loggedOut()
-	if err != nil {
-		return err
+	if lo, err = base.loggedOut(); err != nil {
+		return nil, nil, err
 	}
-	defer func() {
+	if err = insta.applyAttestation(lo); err != nil {
+		return nil, nil, err
+	}
+	restore = func() error {
 		if registered != nil {
-			if rerr := insta.applyAttestation(registered); rerr != nil && err == nil {
-				err = fmt.Errorf("restore attestation: %w", rerr)
+			if rerr := insta.applyAttestation(registered); rerr != nil {
+				return fmt.Errorf("restore attestation: %w", rerr)
 			}
-			return
+			return nil
 		}
 		insta.restoreHeader("X-Meta-Zca", prevZCA)
 		insta.restoreHeader("X-Meta-Usdid", prevUSDID)
 		insta.mu.Lock()
 		insta.curAtt, insta.attSignedAt = prevAtt, prevSigned
 		insta.mu.Unlock()
-	}()
-	if err := insta.applyAttestation(lo); err != nil {
-		return err
+		return nil
 	}
-
-	flow := &loginFlow{waterfallID: generateUUID(), inputPrefix: bloksInstanceID()}
-	if flow.challengeNonce, err = insta.createKeystore(ctx, lo.keyHash); err != nil {
-		return fmt.Errorf("create_android_keystore: %w", err)
-	}
-	if flow.aac, err = insta.fetchAAC(ctx, flow.waterfallID); err != nil {
-		return fmt.Errorf("process_client_data_and_redirect: %w", err)
-	}
-	return insta.sendLogin(ctx, username, password, flow)
+	return lo, restore, nil
 }
 
 func (insta *Instagram) restoreHeader(k, v string) {
@@ -265,7 +312,123 @@ func (insta *Instagram) sendLogin(ctx context.Context, username, password string
 	if err != nil {
 		return withBody(err, body)
 	}
-	return insta.applyLoginResponse(body)
+	err = insta.applyLoginResponse(body)
+	if errors.Is(err, errNoBearer) {
+		if context2fa, ok := parseTwoFactorContext(body); ok {
+			insta.mu.Lock()
+			insta.tfa = &twoFactorState{context: context2fa, raw: string(body)}
+			insta.mu.Unlock()
+			return ErrTwoFactorRequired
+		}
+		return fmt.Errorf("login failed (wrong credentials, checkpoint, or unhandled 2FA): %s", snippet(body))
+	}
+	return err
+}
+
+const (
+	verifyCodeURL     = "https://i.instagram.com/api/v1/bloks/async_action/com.bloks.www.two_step_verification.verify_code.async/"
+	hasBeenAllowedURL = "https://i.instagram.com/api/v1/bloks/async_action/com.bloks.www.two_step_verification.has_been_allowed.async/"
+	clientEndpointTFA = "IgCdsScreenNavigationLoggerModule:com.bloks.www.two_factor_login.enter_totp_code"
+)
+
+// two_step_verification_context appears in the send_login 2FA response and is
+// echoed by verify_code/has_been_allowed. Matched over the unescaped Bloks body.
+var reTFACtx = regexp.MustCompile(`two_step_verification_context\\*"\\*[:=]\\*"([A-Za-z0-9_-]{20,})`)
+
+func parseTwoFactorContext(body []byte) (string, bool) {
+	m := reTFACtx.FindSubmatch(unescape(body))
+	if m == nil {
+		return "", false
+	}
+	return string(m[1]), true
+}
+
+// LoginTwoFactor finishes a login that returned ErrTwoFactorRequired, submitting
+// a TOTP code (see TOTP). It replays verify_code then has_been_allowed, then
+// restores the attestation Login had swapped out.
+func (insta *Instagram) LoginTwoFactor(ctx context.Context, code string) (err error) {
+	insta.mu.Lock()
+	tfa := insta.tfa
+	insta.tfa = nil
+	insta.mu.Unlock()
+	if tfa == nil {
+		return errors.New("no pending two-factor login; call Login and check for ErrTwoFactorRequired first")
+	}
+	if tfa.restore != nil {
+		defer func() {
+			if rerr := tfa.restore(); rerr != nil && err == nil {
+				err = rerr
+			}
+		}()
+	}
+	if tfa.context == "" {
+		return fmt.Errorf("two-factor context not found in login response; raw response: %s", snippet([]byte(tfa.raw)))
+	}
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return errors.New("empty two-factor code")
+	}
+	if _, err := insta.twoStepVerify(ctx, verifyCodeURL, tfa.context, code); err != nil {
+		return fmt.Errorf("verify_code: %w", err)
+	}
+	body, err := insta.twoStepVerify(ctx, hasBeenAllowedURL, tfa.context, "")
+	if err != nil {
+		return fmt.Errorf("has_been_allowed: %w", err)
+	}
+	if aerr := insta.applyLoginResponse(body); aerr != nil {
+		return fmt.Errorf("two-factor accepted but no token in response: %s", snippet(body))
+	}
+	return nil
+}
+
+// twoStepVerify posts one of the two-step async actions. code is set only for
+// verify_code; has_been_allowed sends the same body without it.
+func (insta *Instagram) twoStepVerify(ctx context.Context, url, context2fa, code string) ([]byte, error) {
+	machineID := insta.header("X-Mid")
+	if machineID == "" {
+		machineID = insta.sess.Mid
+	}
+	client := map[string]any{
+		"auth_secure_device_id":  "",
+		"block_store_machine_id": "",
+		"cloud_trust_token":      nil,
+		"device_id":              insta.dID,
+		"family_device_id":       insta.fID,
+		"machine_id":             machineID,
+		"network_bssid":          nil,
+		"should_trust_device":    0,
+	}
+	server := map[string]any{
+		"INTERNAL__latency_qpl_marker_id":   36707139,
+		"INTERNAL__latency_qpl_instance_id": insta.qplInstance(),
+		"device_id":                         insta.dID,
+		"spectra_reg_login_data":            nil,
+		"two_step_verification_context":     context2fa,
+		"flow_source":                       "two_factor_login",
+	}
+	if code != "" {
+		client["code"] = code
+		server["challenge"] = "totp"
+	}
+	form, err := insta.bloksForm(map[string]any{"client_input_params": client, "server_params": server})
+	if err != nil {
+		return nil, err
+	}
+	o := insta.loggedOutRequest(url, "bloks/async_action/"+actionName(url), clientEndpointTFA, form)
+	o.ExtraHeaders["X-Bloks-Prism-Button-Version"] = "CONTROL"
+	o.ExtraHeaders["X-Bloks-Prism-Colors-Enabled"] = "false"
+	body, _, err := insta.sendRequest(ctx, o)
+	if err != nil {
+		return nil, withBody(err, body)
+	}
+	return body, nil
+}
+
+// actionName is the com.bloks.www.* segment of an async_action URL, for the
+// X-Fb-Friendly-Name header.
+func actionName(url string) string {
+	s := strings.TrimSuffix(url, "/")
+	return s[strings.LastIndexByte(s, '/')+1:]
 }
 
 // loginParams builds the send_login_request body. Many fields are static context
@@ -395,7 +558,7 @@ func (insta *Instagram) applyLoginResponse(body []byte) error {
 	flat := unescape(body)
 	auth := reAuth.Find(flat)
 	if auth == nil {
-		return fmt.Errorf("login failed: no authorization token in response (checkpoint, bad credentials, or 2FA)")
+		return errNoBearer
 	}
 	insta.headerOptions.Store("Authorization", string(auth))
 	store := func(re *regexp.Regexp, key string) {

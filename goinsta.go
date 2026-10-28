@@ -46,6 +46,7 @@ type Instagram struct {
 	att         *Attestation // registered keys, restored after the logged-out login flow
 	curAtt      *Attestation // the one currently signing headers
 	attSignedAt time.Time
+	tfa         *twoFactorState // pending two-factor login between Login and LoginTwoFactor
 
 	Account *Account
 
