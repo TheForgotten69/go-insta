@@ -234,9 +234,8 @@ func (o PostOptions) apply(payload map[string]any) {
 	}
 }
 
-// UploadPhoto posts a single JPEG or WebP image to the feed. The image is sent
-// uncropped and its aspect ratio is not checked: pass one already within the
-// feed's 4:5 to 1.91:1 range (the app crops taller images to 3:4).
+// UploadPhoto posts a single JPEG or WebP image to the feed. Instagram stores
+// the pixels as uploaded, so crop to the wanted aspect ratio first.
 func (insta *Instagram) UploadPhoto(ctx context.Context, r io.Reader, opts PostOptions) (*Item, error) {
 	p, err := readPhoto(r)
 	if err != nil {
@@ -259,9 +258,9 @@ func (insta *Instagram) UploadPhoto(ctx context.Context, r io.Reader, opts PostO
 const maxAlbumPhotos = 20
 
 // UploadAlbum posts 2 to 20 JPEG or WebP images as one carousel. All images are
-// checked before any upload starts; the uploads then run in parallel. Images are
-// sent uncropped as a square carousel: pass 1:1 images (the app crops each
-// child to a square).
+// checked before any upload starts; the uploads then run in parallel. Instagram
+// stores each image as uploaded and takes the album's shape from the first one
+// (1080x1350 gives a 4:5 album), so crop them all to one ratio first.
 func (insta *Instagram) UploadAlbum(ctx context.Context, photos []io.Reader, opts PostOptions) (*Item, error) {
 	if len(photos) < 2 || len(photos) > maxAlbumPhotos {
 		return nil, ErrCarouselMediaLimit
