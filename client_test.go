@@ -305,3 +305,19 @@ func TestCollectionPostsAutoRoute(t *testing.T) {
 		t.Errorf("auto collection hit %q", path)
 	}
 }
+
+func TestTOTP(t *testing.T) {
+	// RFC 6238 SHA1 vector: secret "12345678901234567890" at 59s -> 94287082.
+	const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+	got, err := TOTP(secret, time.Unix(59, 0))
+	if err != nil || got != "287082" {
+		t.Fatalf("TOTP = %q, %v; want 287082", got, err)
+	}
+	// Spaces and lowercase from the app's setup screen are accepted.
+	if lc, err := TOTP("gezd gnbv gy3t qojq gezd gnbv gy3t qojq", time.Unix(59, 0)); err != nil || lc != got {
+		t.Errorf("formatted secret = %q, %v", lc, err)
+	}
+	if _, err := TOTP("not valid base32 !!!", time.Now()); err == nil {
+		t.Error("bad secret accepted")
+	}
+}

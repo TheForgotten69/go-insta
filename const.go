@@ -96,10 +96,13 @@ const (
 )
 
 var (
-	ErrTooManyRequests    = errors.New("too many requests, please wait a few minutes before you try again")
-	ErrLoggedOut          = errors.New("you have been logged out, capture a new session")
-	ErrLoginRequired      = errors.New("session is not valid, capture a new session")
-	ErrChallengeRequired  = errors.New("challenge required, resolve it in the app and capture a new session")
+	ErrTooManyRequests   = errors.New("too many requests, please wait a few minutes before you try again")
+	ErrLoggedOut         = errors.New("you have been logged out, capture a new session")
+	ErrLoginRequired     = errors.New("session is not valid, capture a new session")
+	ErrChallengeRequired = errors.New("challenge required, resolve it in the app and capture a new session")
+	// ErrTwoFactorRequired means the password was accepted but the account has
+	// two-factor on. The CAA submit step is not built yet; finish in the app.
+	ErrTwoFactorRequired  = errors.New("two-factor required, complete it in the app and capture a new session")
 	ErrCheckpointRequired = errors.New("checkpoint required, resolve it in the app and capture a new session")
 	ErrSessionInvalid     = errors.New("session is missing authorization or user id")
 

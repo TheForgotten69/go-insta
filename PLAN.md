@@ -15,9 +15,15 @@ The `just` recipes below live in `~/Documents/projects/research/instagram/justfi
 
 ## Login
 
-1. **2FA** — `Login` fails with a generic error when 2FA is on. **[you]** enable TOTP 2FA on the test
-   account and capture a login with `just login`. **[code]** typed `ErrTwoFactorRequired` +
-   `LoginTwoFactor(code)`, optional stdlib TOTP generator, replay test from the capture.
+1. **2FA** — partial. **[code DONE]** stdlib `TOTP(secret, t)` generator (RFC 6238, tested) and the
+   `ErrTwoFactorRequired` sentinel. **[capture DONE 2026-10-28]** `log_tigon_login_20261028-165404.txt`
+   has the full CAA 2FA chain: `send_login_request` (2FA signalled in the Bloks payload, no bearer) ->
+   `two_step_verification.entrypoint`/`method_picker`/`enter_totp_code` (screen renders that thread a
+   `two_step_verification_context`) -> `verify_code.async` (submits `code` + context, `challenge:"totp"`,
+   `flow_source:"two_factor_login"`) -> `has_been_allowed.async` (returns the bearer).
+   **[code TODO]** `LoginTwoFactor(code)`: the send_login 2FA response carries no plain-text marker and
+   the context is threaded through the screen calls, so wiring needs decoding the Bloks payload (the
+   same deep-login work tracked in items 3/4), not a string match.
 2. **Clear login errors** — tell apart wrong password, 429, 2FA and checkpoint from the Bloks
    response instead of "no authorization token". **[you]** capture one failed login (wrong
    password) with `just login`; no failure response exists yet. **[code]** classify from it.
