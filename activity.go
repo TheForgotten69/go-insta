@@ -122,7 +122,7 @@ func (insta *Instagram) Activity() *Activity {
 			"could_truncate_feed": "true",
 			"mark_as_seen":        "false",
 			"push_disabled":       "true",
-			"should_skip_su":      "false",
+			"should_skip_su":      "true",
 			"timezone_name":       insta.sess.TimezoneName,
 			"timezone_offset":     insta.sess.TimezoneOffset,
 		}

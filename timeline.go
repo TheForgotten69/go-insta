@@ -93,6 +93,7 @@ func (tl *Timeline) fetch(ctx context.Context, reason string) ([]*Item, string, 
 		"session_id":                      insta.feedSessionID,
 		"reason":                          reason,
 		"is_pull_to_refresh":              "0",
+		"is_non_feed_surface":             "0",
 		"feed_view_info":                  "[]",
 		"client_seen_store_media_list":    "",
 		"battery_level":                   strconv.Itoa(60 + rand.IntN(40)),
@@ -110,7 +111,7 @@ func (tl *Timeline) fetch(ctx context.Context, reason string) ([]*Item, string, 
 		"X-Device-Id":    insta.uuid,
 		"X-Google-Ad-Id": insta.sess.GoogleAdID,
 		"X-Fb-Request-Analytics-Tags": `{"network_tags":{"product":"` + insta.sess.AppID +
-			`","surface":"undefined","request_category":"critical_api","purpose":"fetch","retry_attempt":"0"},"application_tags":{"app_start_tag":"lukewarm"}}`,
+			`","surface":"undefined","request_category":"critical_api","purpose":"fetch","retry_attempt":"0"}}`,
 	}
 	switch reason {
 	case "pagination":

@@ -98,7 +98,7 @@ func (insta *Instagram) uploadPhoto(ctx context.Context, p *photo, shareType, se
 		OmitAPI:      true,
 		IsPost:       true,
 		DataBytes:    p.data,
-		Priority:     "u=6, i",
+		Priority:     "u=1, i",
 		FriendlyName: "undefined:media-upload",
 		IgnoreHeaders: append([]string{"X-Bloks-Version-Id", "X-Ig-Android-Id", "X-Ig-App-Locale",
 			"X-Ig-Bloks-Serialize-Payload", "X-Ig-Device-Id", "X-Ig-Device-Locale", "X-Ig-Family-Device-Id",
@@ -197,9 +197,12 @@ func (insta *Instagram) configure(ctx context.Context, endpoint string, payload 
 		Endpoint: endpoint,
 		IsPost:   true,
 		Query:    q,
-		Priority: "u=6, i",
-		ExtraHeaders: map[string]string{"X-Fb-Request-Analytics-Tags": `{"network_tags":{"product":"` + insta.sess.AppID +
-			`","surface":"undefined","request_category":"media_upload","purpose":"fetch","retry_attempt":"0"}}`},
+		Priority: "u=1, i",
+		ExtraHeaders: map[string]string{
+			"X-Fb-Request-Analytics-Tags": `{"network_tags":{"product":"` + insta.sess.AppID +
+				`","surface":"undefined","request_category":"media_upload","purpose":"fetch","retry_attempt":"0"}}`,
+			"X-Ig-Eu-Configure-Disabled": "true",
+		},
 	}, &resp)
 	if err != nil {
 		return nil, err

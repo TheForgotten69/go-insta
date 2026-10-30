@@ -164,6 +164,7 @@ func newReplay(t *testing.T, names ...string) (*Instagram, *replay) {
 		ZCA:            "zca",
 		USDID:          "usdid",
 		TimezoneOffset: "3600",
+		TimezoneName:   "Europe/Paris",
 		GoogleAdID:     "ad",
 	})
 	if err != nil {
@@ -187,6 +188,8 @@ var volatileHeaders = map[string]bool{
 	"x-instagram-rupload-params": true, "x-cm-bandwidth-kbps": true, "x-cm-latency": true,
 	"x-ig-app-start-time": true, "x-ig-app-start-request": true, "retry_context": true,
 	"x-fb-rmd": true,
+	// Network session ids, random per process.
+	"x-fb-appnetsession-nid": true, "x-fb-appnetsession-sid": true, "x-fb-session-id": true, "x-fb-session-private": true,
 }
 
 // The fixtures come from the older build (2026-10-27). The current build drops the
@@ -200,12 +203,13 @@ var currentBuildOnly = map[string]bool{
 	"x-fb-appnetsession-nid": true, "x-fb-appnetsession-sid": true, "x-fb-network-properties": true,
 	"x-fb-session-id": true, "x-fb-session-private": true, "x-fb-tasos-td-v2-config": true,
 	"x-meta-tasos-congestion-config": true, "x-meta-tasos-dcc-constraint": true,
-	"x-ig-device-languages": true, "x-ig-device-timezone": true,
+	"x-ig-device-languages": true, "x-ig-device-timezone": true, "x-ig-eu-configure-disabled": true,
 }
 
 // Values the app has sent since the 2026-10-28 captures, where the fixtures have false.
 var currentBuildValues = map[string]string{
 	"x-bloks-prism-extended-palette-gray": "true", "x-bloks-prism-extended-palette-polish-enabled": "true",
+	"priority": "u=1, i", // uploads and configure; the fixtures have u=6, i
 }
 
 // Headers the app sends that are deliberately not replicated.
@@ -213,6 +217,8 @@ var skippedHeaders = map[string]bool{
 	"x-ig-app-start-time": true, "x-ig-app-start-request": true, "x-cm-bandwidth-kbps": true,
 	"x-cm-latency": true, "retry_context": true, "x-ig-nav-chain": true, "x-ig-salt-ids": true,
 	"content-length": true, // set by the transport, not visible on the request headers
+	// A session token seen in the 2026-10-30 16:16 capture only; no response sets it.
+	"x-ig-session-visitation": true,
 }
 
 // UI-context payload fields the library cannot know (nav chains, ranking tokens, impressions).
@@ -229,9 +235,18 @@ var contextKeys = map[string]bool{
 	"client_seen_store_media_list": true, "feed_reshare_info": true, "organic_realtime_information": true,
 	"request_build_time": true, "session_level_signals": true, "triggered_by_visible_spinner": true,
 	"is_from_swipe": true, "container_module": true, "logging_info_token": true,
+	"feed_position": true, "intended_preload_distance": true, "num_feed_items": true, "press_signals": true,
+	"threads_app_version": true, // sent when the Threads app is installed
 }
 
-var uaResolution = regexp.MustCompile(`; \d+x\d+;`)
+// Payload keys only the 2026-10-27 fixtures carry; no later capture sends them.
+var olderBuildKeys = map[string]bool{
+	"enable_canonical_naming": true, "enable_canonical_naming_ambiguous_type_prefixing": true,
+	"enable_canonical_variable_overrides": true,
+}
+
+// The device part of the user agent comes from the session, not the library.
+var uaDevice = regexp.MustCompile(`Android \(.*; ([a-z]{2}_[A-Z]{2}; \d+)\)`)
 
 func checkRequest(t *testing.T, want httplog.Entry, got sent, extraOK ...string) {
 	t.Helper()
@@ -253,8 +268,7 @@ func checkRequest(t *testing.T, want httplog.Entry, got sent, extraOK ...string)
 			continue
 		}
 		if k == "user-agent" {
-			// The Waydroid window was resized mid-capture; GraphQL picked up the new size.
-			g, v = uaResolution.ReplaceAllString(g, ""), uaResolution.ReplaceAllString(v, "")
+			g, v = uaDevice.ReplaceAllString(g, "Android ($1)"), uaDevice.ReplaceAllString(v, "Android ($1)")
 		}
 		if v != "REDACTED" && !volatileHeaders[k] && g != v && currentBuildValues[k] != g {
 			diffH = append(diffH, k+": got "+g+" want "+v)
@@ -296,7 +310,7 @@ func checkRequest(t *testing.T, want httplog.Entry, got sent, extraOK ...string)
 	}
 	var missing, extra []string
 	for k := range wantKeys {
-		if _, has := got.payload[k]; !has && !contextKeys[k] && !ok[k] {
+		if _, has := got.payload[k]; !has && !contextKeys[k] && !olderBuildKeys[k] && !ok[k] {
 			missing = append(missing, k)
 		}
 	}
@@ -333,7 +347,18 @@ func testItem(insta *Instagram, id string) *Item {
 func TestTimeline(t *testing.T) {
 	insta, r := newReplay(t, "timeline")
 	_ = insta.Timeline().Next(t.Context())
-	checkRequest(t, fixture(t, "timeline"), r.sent[0])
+	// The captured first page is the app's first request after start, sent
+	// before its Bloks config loaded; every later request has these values.
+	f := fixture(t, "timeline")
+	f.ReqHeaders = maps.Clone(f.ReqHeaders)
+	for k, v := range map[string]string{
+		"x-bloks-prism-button-version": "INDIGO_PRIMARY_BORDERED_SECONDARY", "x-bloks-prism-colors-enabled": "true",
+		"x-ig-is-adaptive-ui": "true", "x-bloks-prism-extended-palette-gray": "true",
+		"x-bloks-prism-extended-palette-polish-enabled": "true",
+	} {
+		f.ReqHeaders[k] = v
+	}
+	checkRequest(t, f, r.sent[0])
 	if r.sent[0].req.Header.Get("Content-Encoding") != "gzip" {
 		t.Error("timeline body must be gzipped")
 	}
@@ -411,7 +436,7 @@ func TestFriendship(t *testing.T) {
 		id   int64
 		call func(*User, context.Context) error
 	}{
-		{"friendship_show", 62759345752, func(u *User, ctx context.Context) error { _, err := u.LoadFriendship(ctx); return err }},
+		{"friendship_show", 77200259753, func(u *User, ctx context.Context) error { _, err := u.LoadFriendship(ctx); return err }},
 		{"follow", 62759345752, (*User).Follow},
 		{"unfollow", 27626942043, (*User).Unfollow},
 	} {
@@ -428,7 +453,7 @@ func TestFriendship(t *testing.T) {
 
 func TestStoriesAndHighlights(t *testing.T) {
 	insta, r := newReplay(t, "user_story", "highlights_tray")
-	u := insta.NewUser(62759345752)
+	u := insta.NewUser(42865264907)
 	if _, err := u.Stories(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +475,13 @@ func TestHighlightsFollowCursor(t *testing.T) {
 		t.Fatal("fixture has no null cursor to replace")
 	}
 	r.fixtures[0].RespBody = first
-	hl, err := insta.NewUser(62759345752).Highlights(t.Context())
+	var page struct {
+		Tray []json.RawMessage `json:"tray"`
+	}
+	if err := json.Unmarshal(lastNDJSONLine([]byte(first)), &page); err != nil || len(page.Tray) == 0 {
+		t.Fatalf("fixture tray: %v", err)
+	}
+	hl, err := insta.NewUser(42865264907).Highlights(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,8 +495,8 @@ func TestHighlightsFollowCursor(t *testing.T) {
 	if c := r.sent[1].req.URL.Query().Get("cursor"); c != "C1" {
 		t.Errorf("second page cursor = %q, want C1", c)
 	}
-	if len(hl) != 2 || hl[1].insta == nil {
-		t.Errorf("got %d highlights, want one per page", len(hl))
+	if len(hl) != 2*len(page.Tray) || hl[len(hl)-1].insta == nil {
+		t.Errorf("got %d highlights, want %d per page", len(hl), len(page.Tray))
 	}
 }
 
@@ -477,7 +508,7 @@ func TestCreateAndEditHighlight(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := withHeadersOf(t, "highlight_create", "follow")
+	f := fixture(t, "highlight_create")
 	checkRequest(t, f, r.sent[0])
 	checkSigned(t, f, r.sent[0], "title", "media_ids", "should_add_to_main_grid", "source", "supported_capabilities_new")
 	var c map[string]string
@@ -496,7 +527,7 @@ func TestCreateAndEditHighlight(t *testing.T) {
 	if err := reel.AddItems(t.Context(), testItem(insta, "4019430998498617603_42865264907")); err != nil {
 		t.Fatal(err)
 	}
-	f = withHeadersOf(t, "highlight_edit", "follow")
+	f = fixture(t, "highlight_edit")
 	checkRequest(t, f, r.sent[1])
 	checkSigned(t, f, r.sent[1], "added_media_ids", "removed_media_ids", "source")
 	if reel.ReelID() != "highlight:17967220223979721" || len(reel.Items) == 0 || reel.insta == nil {
@@ -900,16 +931,6 @@ func TestUploadStory(t *testing.T) {
 	checkRequest(t, f, r.sent[1])
 }
 
-// The 2026-10-30 captures come from a newer build on another device; base is an
-// older fixture with the same priority and analytics tags.
-func withHeadersOf(t *testing.T, name, base string) httplog.Entry {
-	f := fixture(t, name)
-	friendly := f.ReqHeaders["x-fb-friendly-name"]
-	f.ReqHeaders = maps.Clone(fixture(t, base).ReqHeaders)
-	f.ReqHeaders["x-fb-friendly-name"] = friendly
-	return f
-}
-
 func TestUploadPhotoThreadsStory(t *testing.T) {
 	insta, r := newReplay(t, "user_info", "rupload_feed", "configure_threads", "rupload_story_reshare", "configure_story_reshare")
 	it, err := insta.UploadPhoto(t.Context(), testJPEG(t, 1080, 1350), PostOptions{
@@ -926,7 +947,7 @@ func TestUploadPhotoThreadsStory(t *testing.T) {
 	}
 
 	post := r.sent[2].payload
-	checkRequest(t, withHeadersOf(t, "configure_threads", "configure"), r.sent[2])
+	checkRequest(t, fixture(t, "configure_threads"), r.sent[2])
 	for k, want := range map[string]any{
 		"share_to_threads": "1", "share_to_threads_destination_id": "17841442747228158",
 		"like_and_view_counts_disabled": "1", "share_count_disabled": "1", "is_auto_resharing_to_story": "1",
@@ -951,7 +972,7 @@ func TestUploadPhotoThreadsStory(t *testing.T) {
 		t.Errorf("story frame = %vx%v, want 1080x1920", w, h)
 	}
 	story := r.sent[4].payload
-	checkRequest(t, withHeadersOf(t, "configure_story_reshare", "configure"), r.sent[4])
+	checkRequest(t, fixture(t, "configure_story_reshare"), r.sent[4])
 	if story["reshared_media_id"] != "4019430761377868853" || story["source_type"] != "feed_reshare" {
 		t.Errorf("reshare = %v from %v", story["reshared_media_id"], story["source_type"])
 	}

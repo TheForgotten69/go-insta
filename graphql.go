@@ -24,16 +24,13 @@ func (insta *Instagram) graphQL(ctx context.Context, friendly, docID, rootField,
 		return nil, err
 	}
 	form := map[string]string{
-		"client_doc_id":           docID,
-		"enable_canonical_naming": "true",
-		"enable_canonical_naming_ambiguous_type_prefixing": "true",
-		"enable_canonical_variable_overrides":              "true",
-		"fb_api_req_friendly_name":                         friendly,
-		"format":                                           "json",
-		"locale":                                           "user",
-		"method":                                           "post",
-		"server_timestamps":                                "true",
-		"variables":                                        string(v),
+		"client_doc_id":            docID,
+		"fb_api_req_friendly_name": friendly,
+		"format":                   "json",
+		"locale":                   "user",
+		"method":                   "post",
+		"server_timestamps":        "true",
+		"variables":                string(v),
 	}
 	headers := map[string]string{
 		"Content-Type":                      "application/x-www-form-urlencoded",
