@@ -3,6 +3,21 @@
 All notable changes to this project are documented here. The project uses
 [Semantic Versioning](https://semver.org/) (pre-1.0: a minor bump may break the API).
 
+## [0.3.4] - 2026-10-30
+
+### Enhancements
+
+- Requests follow the 2026-10-28/30 captures: uploads and `configure` use priority
+  `u=1, i` and send `x-ig-eu-configure-disabled`; GraphQL drops the
+  `enable_canonical_*` fields; the timeline sends `is_non_feed_surface` and no longer
+  tags requests `app_start_tag: lukewarm`; the activity inbox sends `should_skip_su=true`.
+- 20 of the 57 replay fixtures now come from the 2026-10-28/30 captures; the rest
+  wait for a capture that exercises them (see `PLAN.md`).
+
+### Bug fixes
+
+- `cmd/httplog` scrubs `press_signals`, which carries the client's IP addresses.
+
 ## [0.3.3] - 2026-10-30
 
 ### Enhancements
@@ -91,6 +106,7 @@ First release: an Instagram for Android 453 private API client.
 - Stories, highlights, likes, comments, saves, follows, photo, album and story uploads.
 - `cmd/httplog` for device captures and `cmd/smoke` for live checks.
 
+[0.3.4]: https://github.com/TheForgotten69/go-insta/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/TheForgotten69/go-insta/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/TheForgotten69/go-insta/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/TheForgotten69/go-insta/compare/v0.3.0...v0.3.1

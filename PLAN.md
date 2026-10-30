@@ -1,63 +1,73 @@
 # go-insta: remaining work
 
-Status (2026-10-28): password login works live (`go run ./cmd/login`). `go run ./cmd/smoke -writes`
-passes 51/51 live: every public method except Login/Logout (reads, follow/unfollow, settings toggle,
-photo/album/story upload with like, save, pin, note, comments, archive, download and delete).
-Parallel album uploads and batched `LoadReels` (10 reels per call) work live. Replay tests pass.
+Status (2026-10-30, v0.3.3): password login with TOTP 2FA works live (`go run ./cmd/login`).
+`go run ./cmd/smoke -writes` passes 51/51 live: every public method except Login/Logout (reads,
+follow/unfollow, settings toggle, photo/album/story upload with like, save, pin, note, comments,
+archive, download and delete). `-crosspost photo|album` (Threads cross-post, hidden counts, story
+reshare) and `-highlight` (create a highlight, add a story, cleanup) also pass live. Replay tests pass.
 
-Done since the login fix: attestation re-signed before its 1 h expiry, `SetProxy` keeps the app TLS
-fingerprint (http CONNECT and socks5), rotated password key stored from the login response,
-recommended-post (`explore_story`) feed items parsed, logged-in request profile moved to the
-current build.
+Done since 2026-10-28, all verified live:
+- Threads cross-post, hidden like/share counts, post reshare to the story (`PostOptions`).
+- `CreateHighlight` and `Reel.AddItems`; `User.Highlights` follows the tray cursor past 10.
+- `User.Posts` on a private, unfollowed profile returns `ErrPrivateAccount` (wraps `*GraphQLError`).
+- Request profile follows the 2026-10-28/30 captures: palette flags, device language/timezone
+  headers, upload priority `u=1, i` and `x-ig-eu-configure-disabled`, no `enable_canonical_*` on
+  GraphQL, `is_non_feed_surface` on the timeline, no `lukewarm` tag on later timeline pages.
+
+The Instagram app is still 453.0.0.55.79 in every capture; `threads_app_version=453.0.0.56.79`
+is the Threads app.
 
 Ownership: **[you]** = capture or key work done outside this repo; **[code]** = changes in this repo.
 The `just` recipes below live in `~/Documents/projects/research/instagram/justfile`.
 
+## Features
+
+1. **Reel (video) upload** (issue #6): needs a capture of the app posting a Reel (segmented
+   rupload with `media_type=2`, cover frame, `configure_to_clips`). **[you]**, then **[code]**
+2. **Highlight management**: remove a story from a highlight, delete, rename, change the cover
+   (especially "from camera roll", for a dedicated cover image). `edit_reel` already carries
+   `removed_media_ids`, so removal may only need a live test. Needs a capture for the rest. **[you]**
+   Instagram cuts titles to 16 characters without an error.
+
 ## Login
 
-1. ~~**2FA**~~ — DONE, verified live 2026-10-28 (`cmd/login` prompted for the TOTP code, then
-   `cmd/smoke` passed 27/27 on the new session). `Login` returns `ErrTwoFactorRequired`,
-   `LoginTwoFactor(code)` replays `method_picker.navigation.async` -> `verify_code.async`;
-   `IG_TOTP_SECRET` makes `cmd/login` non-interactive. See `docs/twofactor.md`.
-
-2. ~~**Clear login errors**~~ — DONE: wrong password -> `ErrBadPassword` (from the
-   `FIRST_PASSWORD_FAILURE` event in `log_tigon_login_20261028-165404.txt` #6), 429 ->
-   `ErrTooManyRequests`, 2FA -> `ErrTwoFactorRequired`; anything else reports its Bloks
-   `error_info` kind. No checkpoint response has been captured yet.
-3. **Checkpoints (`checkpoint.ufac.*`)** — captcha, contact-point code, selfie flows are in the
-   captures but unhandled. **[code]**
+3. **Checkpoints (`checkpoint.ufac.*`)**: captcha, contact-point code, selfie flows are in the
+   captures but unhandled; no checkpoint response from our own logins captured yet. **[code]**
 4. `oauth.token.fetch.async` (sent by the app before every login) is skipped. Login works without
    it; add only if logins start failing. **[code]**
 
+Done: 2FA (`docs/twofactor.md`), clear login errors (`ErrBadPassword`, `ErrTooManyRequests`,
+`ErrTwoFactorRequired`).
+
 ## Device identity and attestation
 
-5. **Mixed installs** — `login.session.json` (attestation keys now embedded under `attestation`)
-   comes from Waydroid install 1; the app has been reinstalled 3 times since. Re-extract keys and
-   device ids from one current install, or self-register (next item). **[you]**
-6. **Post-login key upload** — after login the app uploads a fresh zca key
+5. **Mixed installs**: `login.session.json` (attestation keys embedded under `attestation`) comes
+   from Waydroid install 1, and its user agent still says Waydroid while the app has sent a Pixel 5
+   user agent since 2026-10-28. Re-extract keys, device ids and the user agent from one current
+   install, or self-register (next item). **[you]**
+6. **Post-login key upload**: after login the app uploads a fresh zca key
    (`create_android_keystore` → `upload_android_keystore_key`); we keep signing with the old
    install-1 key. Flow is mapped (see memory/attestation notes), not built. **[code]**
 
 ## Request profile
 
-7. **Fixture refresh** — the request profile now follows the 2026-10-28 captures (host
-   `i.instagram.com`, no `x-zero-*`, network-stack headers; `TestCurrentBuildProfile`). The
-   replay fixtures still come from the older build, so request bodies are only checked against
-   it. 14 endpoints exist in the new captures and can be re-fixtured from them; the write
-   endpoints (like, follow, comment, upload…) need a new logged-in capture that uses them. **[code]**/**[you]**
-8. **HTTP/2 fingerprint** — header order (app: app-layer headers sorted, then network-stack
-    headers sorted), pseudo-header order and SETTINGS still differ from the app. Not needed for
-    login so far. **[you]** `just capture feed` fills `h2/*.jsonl` (h2-dump.py); **[code]** switch
-    to an HTTP/2 stack that allows ordering (e.g. bogdanfinn/fhttp) if it becomes necessary.
+7. **Fixture refresh**: 20 of 57 fixtures now come from the 2026-10-28/30 captures. Still from
+   2026-10-27, because no later capture exercises them: follow/unfollow, story like, restricted
+   users, reel settings, like, save, comments (all), collections, note, album configure, clips
+   seen, media delete/only-me/pin, account search, followers/following, show_many. Kept old on
+   purpose: `reels_tray`, `reels_media_stream`, `clips_discover`, `user_info_stream` and
+   `info_stream_search`/`_following` (different entry points), plain `configure`/`configure_story`
+   (the later captures only have other variants), `chaining` (later response has no users),
+   `profile_timeline` (item 8). A capture that does those actions once lets the rest move
+   over. **[you]**
+8. **Profile timeline variables**: the later `IGProfileTimelineQuery` captures send different
+   variables from ours (e.g. `include_media_notes_fields`, `skip_ig_play_count`,
+   `lightweight_carousel_type`); compare per surface (own vs other profile) and update. **[code]**
+9. **`x-ig-session-visitation`**: a token seen on many requests in the 2026-10-30 16:16 capture
+   only; no response sets it. Find its origin if requests start failing without it. **[you]**
+10. **HTTP/2 fingerprint**: header order (app: app-layer headers sorted, then network-stack
+    headers sorted), pseudo-header order and SETTINGS still differ from the app. Not needed so
+    far. **[you]** `just capture feed` fills `h2/*.jsonl` (h2-dump.py); **[code]** switch to an
+    HTTP/2 stack that allows ordering (e.g. bogdanfinn/fhttp) if it becomes necessary.
 
-## Coverage
-
-9. ~~**Untested writes**~~ — DONE: like, save, story like/seen, album and story upload, pin,
-    archive, note and settings toggle all run in `cmd/smoke -writes` (51/51 live, 2026-10-28).
-10. **`Logout` untested live.** **[code]**
-11. ~~**Session persistence**~~ — DONE: `insta.OnSessionChange` fires when a rotated header is
-    stored, so callers can persist without polling (verified live, 2026-10-28).
-
-Added 2026-10-28 (verified live): `SearchUsers` and `Collection.Posts` are now pagers;
-the all-media auto collection reads from `feed/saved/posts/`, a numbered one from
-`feed/collection/<id>/`.
+Not planned: a live `Logout` test.
