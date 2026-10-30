@@ -307,6 +307,15 @@ func checkRequest(t *testing.T, want httplog.Entry, got sent, extraOK ...string)
 	}
 }
 
+func checkSigned(t *testing.T, want httplog.Entry, got sent, keys ...string) {
+	t.Helper()
+	for _, k := range keys {
+		if got.payload[k] != want.ReqSigned[k] {
+			t.Errorf("%s = %v, want %v", k, got.payload[k], want.ReqSigned[k])
+		}
+	}
+}
+
 func testItem(insta *Instagram, id string) *Item {
 	it := &Item{ID: id}
 	setToItem(it, insta, "feed_timeline")
@@ -423,6 +432,41 @@ func TestStoriesAndHighlights(t *testing.T) {
 	checkRequest(t, fixture(t, "highlights_tray"), r.sent[1])
 	if len(hl) == 0 || !strings.HasPrefix(hl[0].ReelID(), "highlight:") {
 		t.Errorf("highlights not parsed: %d", len(hl))
+	}
+}
+
+func TestCreateAndEditHighlight(t *testing.T) {
+	insta, r := newReplay(t, "highlight_create", "highlight_edit")
+	cover := testItem(insta, "4019477520007509117_42865264907")
+	cover.OriginalWidth, cover.OriginalHeight = 1080, 1920
+	hl, err := insta.CreateHighlight(t.Context(), "a", cover)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := withHeadersOf(t, "highlight_create", "follow")
+	checkRequest(t, f, r.sent[0])
+	checkSigned(t, f, r.sent[0], "title", "media_ids", "should_add_to_main_grid", "source", "supported_capabilities_new")
+	var c map[string]string
+	if err := json.Unmarshal([]byte(r.sent[0].payload["cover"].(string)), &c); err != nil {
+		t.Fatalf("cover is not a JSON string: %v", r.sent[0].payload["cover"])
+	}
+	// The app's crop for a 1080x1920 story was [0.0,0.21830457,1.0,0.78094524].
+	if c["media_id"] != cover.ID || c["crop_rect"] != "[0.0,0.21875,1.0,0.78125]" {
+		t.Errorf("cover = %v", c)
+	}
+	if hl.ReelID() != "highlight:18117897188002088" || len(hl.Items) != 1 {
+		t.Errorf("created reel = %s with %d items", hl.ReelID(), len(hl.Items))
+	}
+
+	reel := &Reel{insta: insta, ID: json.RawMessage(`"highlight:17967220223979721"`)}
+	if err := reel.AddItems(t.Context(), testItem(insta, "4019430998498617603_42865264907")); err != nil {
+		t.Fatal(err)
+	}
+	f = withHeadersOf(t, "highlight_edit", "follow")
+	checkRequest(t, f, r.sent[1])
+	checkSigned(t, f, r.sent[1], "added_media_ids", "removed_media_ids", "source")
+	if reel.ReelID() != "highlight:17967220223979721" || len(reel.Items) == 0 || reel.insta == nil {
+		t.Errorf("edited reel = %s with %d items", reel.ReelID(), len(reel.Items))
 	}
 }
 
@@ -822,12 +866,12 @@ func TestUploadStory(t *testing.T) {
 	checkRequest(t, f, r.sent[1])
 }
 
-// withConfigureHeaders swaps in the older build's configure headers: the
-// 2026-10-30 capture comes from a build that sends a different header set.
-func withConfigureHeaders(t *testing.T, name string) httplog.Entry {
+// The 2026-10-30 captures come from a newer build on another device; base is an
+// older fixture with the same priority and analytics tags.
+func withHeadersOf(t *testing.T, name, base string) httplog.Entry {
 	f := fixture(t, name)
 	friendly := f.ReqHeaders["x-fb-friendly-name"]
-	f.ReqHeaders = maps.Clone(fixture(t, "configure").ReqHeaders)
+	f.ReqHeaders = maps.Clone(fixture(t, base).ReqHeaders)
 	f.ReqHeaders["x-fb-friendly-name"] = friendly
 	return f
 }
@@ -848,7 +892,7 @@ func TestUploadPhotoThreadsStory(t *testing.T) {
 	}
 
 	post := r.sent[2].payload
-	checkRequest(t, withConfigureHeaders(t, "configure_threads"), r.sent[2])
+	checkRequest(t, withHeadersOf(t, "configure_threads", "configure"), r.sent[2])
 	for k, want := range map[string]any{
 		"share_to_threads": "1", "share_to_threads_destination_id": "17841442747228158",
 		"like_and_view_counts_disabled": "1", "share_count_disabled": "1", "is_auto_resharing_to_story": "1",
@@ -873,7 +917,7 @@ func TestUploadPhotoThreadsStory(t *testing.T) {
 		t.Errorf("story frame = %vx%v, want 1080x1920", w, h)
 	}
 	story := r.sent[4].payload
-	checkRequest(t, withConfigureHeaders(t, "configure_story_reshare"), r.sent[4])
+	checkRequest(t, withHeadersOf(t, "configure_story_reshare", "configure"), r.sent[4])
 	if story["reshared_media_id"] != "4019430761377868853" || story["source_type"] != "feed_reshare" {
 		t.Errorf("reshare = %v from %v", story["reshared_media_id"], story["source_type"])
 	}

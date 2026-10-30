@@ -50,6 +50,8 @@ const (
 	urlFriendship       = "friendships/show/%d/"
 	urlUserStories      = "feed/user/%d/story/"
 	urlUserHighlights   = "highlights/%d/highlights_tray/"
+	urlHighlightCreate  = "highlights/create_reel/"
+	urlHighlightEdit    = "highlights/%s/edit_reel/"
 	urlDiscoverChaining = "discover/chaining/"
 	urlDiscoverAYML     = "discover/ayml/"
 	urlRestrictedUsers  = "restrict_action/get_restricted_users/"
@@ -108,6 +110,8 @@ var (
 	ErrSessionInvalid     = errors.New("session is missing authorization or user id")
 
 	ErrInvalidImage       = errors.New("invalid file type, please use a jpeg or webp image")
+	ErrNoHighlightItems   = errors.New("a highlight needs at least one story item")
+	ErrNotHighlight       = errors.New("reel is not a highlight")
 	ErrCarouselMediaLimit = errors.New("an album takes 2 to 20 photos")
 
 	ErrNoMore        = errors.New("no more posts available, page end has been reached")

@@ -56,8 +56,9 @@ func main() {
 	pause := flag.Duration("pause", 2*time.Second, "delay between calls")
 	writes := flag.Bool("writes", false, "also run reversible writes on your own account")
 	albumSize := flag.Int("album", 2, "photos in the -writes album")
-	keep := flag.Bool("keep", false, "with -crosspost, leave the post and its story up")
+	keep := flag.Bool("keep", false, "with -crosspost or -highlight, leave what it made up")
 	crosspost := flag.String("crosspost", "", "photo or album: post it shared to Threads and the story with hidden counts, then delete it (the Threads copy stays)")
+	highlight := flag.Bool("highlight", false, "post two stories, make a highlight of one, add the other, then delete the stories")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -99,6 +100,9 @@ func main() {
 	}
 	if *crosspost != "" {
 		writeCrosspost(r, insta, *crosspost, *keep)
+	}
+	if *highlight {
+		writeHighlight(r, insta, *keep)
 	}
 
 	if err := insta.ExportSession(*session); err != nil {
@@ -525,6 +529,82 @@ func writeCrosspost(r *runner, insta *goinsta.Instagram, kind string, keep bool)
 		}
 		return summary, errors.Join(err, story.Delete(ctx))
 	})
+}
+
+func writeHighlight(r *runner, insta *goinsta.Instagram, keep bool) {
+	ctx := r.ctx
+	var stories []*goinsta.Item
+	for _, hue := range []uint8{40, 200} {
+		r.step("UploadStory (highlight)", func() (string, error) {
+			s, err := insta.UploadStory(ctx, testJPEG(hue))
+			if err != nil {
+				return "", err
+			}
+			stories = append(stories, s)
+			return s.ID, nil
+		})
+	}
+	var hl *goinsta.Reel
+	if len(stories) == 2 {
+		r.step("CreateHighlight", func() (string, error) {
+			var err error
+			hl, err = insta.CreateHighlight(ctx, "go-insta smoke", stories[0])
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("%s title=%q items=%d", hl.ReelID(), hl.Title, len(hl.Items)), nil
+		})
+	}
+	if hl != nil {
+		r.step("reel.AddItems", func() (string, error) {
+			if err := hl.AddItems(ctx, stories[1]); err != nil {
+				return "", err
+			}
+			summary := fmt.Sprintf("%s items=%d", hl.ReelID(), len(hl.Items))
+			if len(hl.Items) != 2 {
+				return summary, errors.New("want 2 items: " + summary)
+			}
+			return summary, nil
+		})
+		r.step("own Highlights lists it", func() (string, error) {
+			h, err := findHighlight(ctx, insta, hl.ReelID())
+			if err == nil && h == nil {
+				err = errors.New(hl.ReelID() + " not listed")
+			}
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("%s media_count=%d", hl.ReelID(), h.MediaCount), nil
+		})
+	}
+	if keep {
+		return
+	}
+	for _, s := range stories {
+		r.step("item.Delete (highlight story)", func() (string, error) { return s.ID, s.Delete(ctx) })
+	}
+	if hl != nil {
+		r.step("highlight after deleting its stories", func() (string, error) {
+			h, err := findHighlight(ctx, insta, hl.ReelID())
+			if h == nil {
+				return hl.ReelID() + " gone", err
+			}
+			return fmt.Sprintf("%s still listed, media_count=%d", hl.ReelID(), h.MediaCount), err
+		})
+	}
+}
+
+func findHighlight(ctx context.Context, insta *goinsta.Instagram, id string) (*goinsta.Reel, error) {
+	all, err := insta.Account.User().Highlights(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, h := range all {
+		if h.ReelID() == id {
+			return h, nil
+		}
+	}
+	return nil, nil
 }
 
 func lastIndex(items []*goinsta.Item) int {

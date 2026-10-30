@@ -103,6 +103,88 @@ func (user *User) Highlights(ctx context.Context) ([]*Reel, error) {
 	return tray.Reels, nil
 }
 
+// CreateHighlight makes a highlight from story items; the first is the cover.
+func (insta *Instagram) CreateHighlight(ctx context.Context, title string, items ...*Item) (*Reel, error) {
+	if len(items) == 0 {
+		return nil, ErrNoHighlightItems
+	}
+	cover, _ := json.Marshal(map[string]string{"media_id": items[0].ID, "crop_rect": coverCrop(items[0])})
+	return insta.postHighlight(ctx, urlHighlightCreate, map[string]string{
+		"title":                   title,
+		"cover":                   string(cover),
+		"media_ids":               mediaIDList(items),
+		"creation_id":             newUploadID(),
+		"should_add_to_main_grid": "false",
+	})
+}
+
+// AddItems adds story items to a highlight and replaces the reel with the server's copy.
+func (reel *Reel) AddItems(ctx context.Context, items ...*Item) error {
+	if !strings.HasPrefix(reel.ReelID(), "highlight:") {
+		return ErrNotHighlight
+	}
+	if len(items) == 0 {
+		return ErrNoHighlightItems
+	}
+	got, err := reel.insta.postHighlight(ctx, fmt.Sprintf(urlHighlightEdit, reel.ReelID()), map[string]string{
+		"added_media_ids":   mediaIDList(items),
+		"removed_media_ids": "[]",
+	})
+	if err != nil {
+		return err
+	}
+	*reel = *got
+	return nil
+}
+
+func (insta *Instagram) postHighlight(ctx context.Context, endpoint string, payload map[string]string) (*Reel, error) {
+	payload["_uid"] = strconv.FormatInt(insta.userID(), 10)
+	payload["_uuid"] = insta.uuid
+	payload["source"] = "STORY_VIEWER_PROFILE"
+	payload["supported_capabilities_new"] = supportedCapabilities
+	q, err := signedBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Reel Reel `json:"reel"`
+	}
+	if err := insta.callJSON(ctx, &reqOptions{Endpoint: endpoint, IsPost: true, Query: q}, &resp); err != nil {
+		return nil, err
+	}
+	resp.Reel.setValues(insta)
+	return &resp.Reel, nil
+}
+
+// mediaIDList is a JSON array of "<pk>_<owner>" ids, sent as a string.
+func mediaIDList(items []*Item) string {
+	ids := make([]string, len(items))
+	for i, it := range items {
+		ids[i] = it.ID
+	}
+	b, _ := json.Marshal(ids)
+	return string(b)
+}
+
+// coverCrop is the centred square of the cover as [left,top,right,bottom]
+// fractions, formatted like Java floats ("0.0", "0.21830457").
+func coverCrop(it *Item) string {
+	w, h := float64(it.OriginalWidth), float64(it.OriginalHeight)
+	r := [4]float64{0, 0, 1, 1}
+	if w > 0 && h > 0 {
+		fx, fy := min(1, h/w), min(1, w/h)
+		r = [4]float64{(1 - fx) / 2, (1 - fy) / 2, (1 + fx) / 2, (1 + fy) / 2}
+	}
+	parts := make([]string, len(r))
+	for i, v := range r {
+		parts[i] = strconv.FormatFloat(v, 'f', -1, 32)
+		if !strings.Contains(parts[i], ".") {
+			parts[i] += ".0"
+		}
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
 func (reel *Reel) setValues(insta *Instagram) {
 	reel.insta = insta
 	reel.User.insta = insta
