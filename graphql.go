@@ -2,6 +2,7 @@ package goinsta
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,17 +16,28 @@ const (
 	docProfileTimeline = "56030350814162075904140659961"
 	docFollowersList   = "284797047911918316998205836755"
 	docFollowingList   = "16104639286363954576550227636"
+
+	docArchiveHighlight   = "355043344414417317058010037446"
+	docUnarchiveHighlight = "52990869615876622121615642083"
 )
 
-// purpose is "fetch", "refresh" or "prefetch"; "" omits it, as list and search queries do.
-func (insta *Instagram) graphQL(ctx context.Context, friendly, docID, rootField, purpose string, vars map[string]any) ([]byte, error) {
+type gqlQuery struct {
+	url      string // graphQLURL when empty
+	friendly string
+	docID    string
+	root     string
+	purpose  string // "fetch", "refresh" or "prefetch"; "" omits it, as list and search queries do
+}
+
+func (insta *Instagram) graphQL(ctx context.Context, gq gqlQuery, vars map[string]any) ([]byte, error) {
+	url := cmp.Or(gq.url, graphQLURL)
 	v, err := json.Marshal(vars)
 	if err != nil {
 		return nil, err
 	}
 	form := map[string]string{
-		"client_doc_id":            docID,
-		"fb_api_req_friendly_name": friendly,
+		"client_doc_id":            gq.docID,
+		"fb_api_req_friendly_name": gq.friendly,
 		"format":                   "json",
 		"locale":                   "user",
 		"method":                   "post",
@@ -34,28 +46,28 @@ func (insta *Instagram) graphQL(ctx context.Context, friendly, docID, rootField,
 	}
 	headers := map[string]string{
 		"Content-Type":                      "application/x-www-form-urlencoded",
-		"X-Client-Doc-Id":                   docID,
+		"X-Client-Doc-Id":                   gq.docID,
 		"X-Ig-Validate-Null-In-Legacy-Dict": "true",
 		"X-Graphql-Client-Library":          "pando",
-		"X-Root-Field-Name":                 rootField,
+		"X-Root-Field-Name":                 gq.root,
 	}
 	tagPurpose := "none"
-	if purpose != "" {
-		form["purpose"] = purpose
-		headers["X-Graphql-Request-Purpose"] = purpose
-		tagPurpose = purpose
+	if gq.purpose != "" {
+		form["purpose"] = gq.purpose
+		headers["X-Graphql-Request-Purpose"] = gq.purpose
+		tagPurpose = gq.purpose
 	}
 	headers["X-Fb-Request-Analytics-Tags"] = `{"network_tags":{"product":"` + insta.sess.AppID +
 		`","request_category":"graphql","purpose":"` + tagPurpose + `","retry_attempt":"0"}}`
 	body, err := insta.call(ctx, &reqOptions{
-		Endpoint: graphQLURL,
+		Endpoint: url,
 		IsPost:   true,
-		Gzip:     true,
+		Gzip:     url == graphQLURL, // graphql_www bodies go uncompressed
 		Priority: "u=3, i",
 		IgnoreHeaders: append([]string{"X-Ig-Www-Claim", "X-Ig-Family-Device-Id", "X-Fb-Connection-Type",
 			"X-Ig-Connection-Type", "X-Ig-Client-Endpoint", "X-Ig-Bloks-Serialize-Payload",
 			"X-Ig-Bandwidth-Speed-Kbps", "X-Ig-Bandwidth-Totalbytes-B", "X-Ig-Bandwidth-Totaltime-Ms"}, bloksHeaders...),
-		FriendlyName: friendly,
+		FriendlyName: gq.friendly,
 		Query:        form,
 		ExtraHeaders: headers,
 	})
@@ -179,7 +191,8 @@ func (user *User) Posts() *Pager[*Item] {
 			vars["pinned_profile_grid_items_ids"] = ""
 			vars["request_media_chunk"] = false
 		}
-		body, err := user.insta.graphQL(ctx, "IGProfileTimelineQuery", docProfileTimeline, "xdt_api__v1__profile_timeline", "fetch", vars)
+		body, err := user.insta.graphQL(ctx, gqlQuery{friendly: "IGProfileTimelineQuery", docID: docProfileTimeline,
+			root: "xdt_api__v1__profile_timeline", purpose: "fetch"}, vars)
 		if gqlErr := (*GraphQLError)(nil); user.IsPrivate && errors.As(err, &gqlErr) {
 			err = fmt.Errorf("%w: %w", ErrPrivateAccount, err)
 		}

@@ -143,7 +143,7 @@ func (user *User) followList(friendly, doc, root string, entry entryContext, var
 		if maxID != "" {
 			vars["max_id"] = maxID
 		}
-		body, err := insta.graphQL(ctx, friendly, doc, root, "", vars)
+		body, err := insta.graphQL(ctx, gqlQuery{friendly: friendly, docID: doc, root: root}, vars)
 		if err != nil {
 			return nil, "", err
 		}

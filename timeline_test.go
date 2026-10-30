@@ -100,7 +100,7 @@ func TestDeviceHeaders(t *testing.T) {
 		}
 	}
 
-	_, _ = insta.graphQL(ctx, "Q", "1", "root", "", nil)
+	_, _ = insta.graphQL(ctx, gqlQuery{friendly: "Q", docID: "1", root: "root"}, nil)
 	if h := rec.last.Header; h.Get("X-Ig-Device-Timezone") != tz || h.Get("X-Ig-Device-Languages") != "" {
 		t.Errorf("graphql timezone %q languages %q", h.Get("X-Ig-Device-Timezone"), h.Get("X-Ig-Device-Languages"))
 	}
