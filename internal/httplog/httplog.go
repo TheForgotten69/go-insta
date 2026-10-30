@@ -355,6 +355,13 @@ func Scrub(e Entry, s Session) Entry {
 	for _, v := range []string{s.Mid, s.WWWClaim, s.Rur, s.ZCA, s.USDID, s.GoogleAdID} {
 		add(v, "REDACTED")
 	}
+	// press_signals carries the client's IPv4 and IPv6 addresses.
+	for _, m := range []map[string]string{e.Query, e.ReqForm} {
+		if v := m["press_signals"]; v != "" {
+			add(v, "REDACTED")
+			add(url.QueryEscape(v), "REDACTED")
+		}
+	}
 	r := strings.NewReplacer(repl...)
 
 	scrubMap := func(m map[string]string) map[string]string {

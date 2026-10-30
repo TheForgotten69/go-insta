@@ -2,6 +2,7 @@ package httplog
 
 import (
 	"encoding/base64"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -56,5 +57,22 @@ func TestParseAndScrub(t *testing.T) {
 		if strings.Contains(all, secret) {
 			t.Errorf("scrub leaked %q", secret)
 		}
+	}
+}
+
+func TestScrubPressSignals(t *testing.T) {
+	signals := `{"client_ipv4":"203.0.113.7","client_ipv6":"2001:db8::1"}`
+	e := Entry{
+		ReqForm: map[string]string{"press_signals": signals, "reason": "pagination"},
+		ReqBody: "reason=pagination&press_signals=" + url.QueryEscape(signals),
+	}
+	got := Scrub(e, Session{})
+	for _, s := range []string{got.ReqForm["press_signals"], got.ReqBody} {
+		if strings.Contains(s, "203.0.113.7") || strings.Contains(s, "2001:db8") {
+			t.Errorf("client ip left in %q", s)
+		}
+	}
+	if got.ReqForm["reason"] != "pagination" {
+		t.Errorf("other fields changed: %v", got.ReqForm)
 	}
 }
