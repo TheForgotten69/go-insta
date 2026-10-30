@@ -474,7 +474,7 @@ func writeCrosspost(r *runner, insta *goinsta.Instagram, kind string, keep bool)
 	opts := goinsta.PostOptions{
 		Caption:        "go-insta crosspost smoke (" + kind + ")",
 		ShareToThreads: true, HideLikeCounts: true, HideShareCounts: true,
-		StoryImage: storyJPEG(),
+		ShareToStory: true,
 	}
 	upload := func() (*goinsta.Item, error) { return insta.UploadPhoto(ctx, testJPEG(80), opts) }
 	switch kind {
@@ -525,25 +525,6 @@ func writeCrosspost(r *runner, insta *goinsta.Instagram, kind string, keep bool)
 		}
 		return summary, errors.Join(err, story.Delete(ctx))
 	})
-}
-
-// storyJPEG is a 1080x1920 frame with the post card centered, as the app renders it.
-func storyJPEG() io.Reader {
-	img := image.NewRGBA(image.Rect(0, 0, 1080, 1920))
-	for y := range 1920 {
-		for x := range 1080 {
-			c := color.RGBA{30, 30, 40, 255}
-			if x >= 270 && x < 810 && y >= 690 && y < 1230 {
-				c = color.RGBA{uint8(x/5) + 80, uint8(y / 8), 80, 255}
-			}
-			img.Set(x, y, c)
-		}
-	}
-	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
-		fail("jpeg", err)
-	}
-	return &buf
 }
 
 func lastIndex(items []*goinsta.Item) int {

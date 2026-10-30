@@ -39,9 +39,9 @@ tray, err := insta.StoryTray(ctx, goinsta.TrayColdStart)
 err = insta.LoadReels(ctx, tray.Reels...) // fills unloaded reels, batched
 
 item, err := insta.UploadAlbum(ctx, photos, goinsta.PostOptions{Caption: "hi"})
-// Cross-post to Threads, hide counts, and share to the story with a rendered card.
+// Cross-post to Threads, hide counts, and share to the story as a post card.
 item, err = insta.UploadPhoto(ctx, img, goinsta.PostOptions{
-	ShareToThreads: true, HideLikeCounts: true, HideShareCounts: true, StoryImage: card,
+	ShareToThreads: true, HideLikeCounts: true, HideShareCounts: true, ShareToStory: true,
 })
 paths, err := item.DownloadTo(ctx, "out/")
 ```

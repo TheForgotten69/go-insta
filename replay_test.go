@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"image"
 	"image/jpeg"
 	"io"
@@ -836,7 +835,7 @@ func withConfigureHeaders(t *testing.T, name string) httplog.Entry {
 func TestUploadPhotoThreadsStory(t *testing.T) {
 	insta, r := newReplay(t, "user_info", "rupload_feed", "configure_threads", "rupload_story_reshare", "configure_story_reshare")
 	it, err := insta.UploadPhoto(t.Context(), testJPEG(t, 1080, 1350), PostOptions{
-		ShareToThreads: true, HideLikeCounts: true, HideShareCounts: true, StoryImage: testJPEG(t, 1080, 1920),
+		ShareToThreads: true, HideLikeCounts: true, HideShareCounts: true, ShareToStory: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -870,6 +869,9 @@ func TestUploadPhotoThreadsStory(t *testing.T) {
 	if rp["share_type"] != "stories" {
 		t.Errorf("story rupload share_type = %q", rp["share_type"])
 	}
+	if w, h := r.sent[4].payload["original_width"], r.sent[4].payload["original_height"]; w != "1080" || h != "1920" {
+		t.Errorf("story frame = %vx%v, want 1080x1920", w, h)
+	}
 	story := r.sent[4].payload
 	checkRequest(t, withConfigureHeaders(t, "configure_story_reshare"), r.sent[4])
 	if story["reshared_media_id"] != "4019430761377868853" || story["source_type"] != "feed_reshare" {
@@ -878,23 +880,22 @@ func TestUploadPhotoThreadsStory(t *testing.T) {
 	var gotTap, wantTap []map[string]any
 	_ = json.Unmarshal([]byte(story["tap_models"].(string)), &gotTap)
 	_ = json.Unmarshal([]byte(fixture(t, "configure_story_reshare").ReqSigned["tap_models"].(string)), &wantTap)
+	// The tap area is the card drawn here: a 1080x1350 post scaled to 810x1012 on 1080x1920.
+	if len(gotTap) == 1 && (gotTap[0]["width"] != 0.75 || gotTap[0]["height"] != 1012.0/1920) {
+		t.Errorf("tap area = %vx%v", gotTap[0]["width"], gotTap[0]["height"])
+	}
+	for _, m := range [][]map[string]any{gotTap, wantTap} {
+		if len(m) == 1 {
+			delete(m[0], "width")
+			delete(m[0], "height")
+		}
+	}
 	if !reflect.DeepEqual(gotTap, wantTap) {
 		t.Errorf("tap_models differ:\n got %v\nwant %v", gotTap, wantTap)
 	}
 
 	if s := insta.Session(); s.FbIDV2 != 17841442747228158 {
 		t.Errorf("session fbid_v2 = %d", s.FbIDV2)
-	}
-}
-
-func TestUploadPhotoBadStoryImage(t *testing.T) {
-	insta, r := newReplay(t)
-	_, err := insta.UploadPhoto(t.Context(), testJPEG(t, 10, 10), PostOptions{StoryImage: strings.NewReader("not an image")})
-	if !errors.Is(err, ErrInvalidImage) {
-		t.Errorf("err = %v, want ErrInvalidImage", err)
-	}
-	if len(r.sent) != 0 {
-		t.Errorf("sent %d requests before rejecting the story image", len(r.sent))
 	}
 }
 

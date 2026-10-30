@@ -231,28 +231,28 @@ type PostOptions struct {
 	// HideLikeCounts hides the like and view counts.
 	HideLikeCounts  bool
 	HideShareCounts bool
-	// StoryImage, when set, also shares the post to the story with this JPEG or
-	// WebP image, which the app renders as the post card centered on the frame.
-	// If only the story share fails, the post is returned with the error.
-	StoryImage io.Reader
+	// ShareToStory also shares the post to the story as a tappable post card
+	// drawn from its first image. If only the story share fails, the post is
+	// returned with the error.
+	ShareToStory bool
 }
 
-// postExtras are PostOptions resolved before anything is uploaded, so a bad
-// story image or a failed lookup never leaves a half-published post.
+// postExtras are PostOptions resolved before anything is uploaded, so a failed
+// render or lookup never leaves a half-published post.
 type postExtras struct {
 	opts  PostOptions
 	fbid  int64
-	story *photo
+	story *storyCard
 }
 
-func (insta *Instagram) preparePost(ctx context.Context, opts PostOptions) (*postExtras, error) {
+func (insta *Instagram) preparePost(ctx context.Context, opts PostOptions, first *photo) (*postExtras, error) {
 	x := &postExtras{opts: opts}
-	if opts.StoryImage != nil {
-		p, err := readPhoto(opts.StoryImage)
+	if opts.ShareToStory {
+		card, err := renderStoryCard(first.data)
 		if err != nil {
-			return nil, fmt.Errorf("story image: %w", err)
+			return nil, err
 		}
-		x.story = p
+		x.story = card
 	}
 	if opts.ShareToThreads {
 		id, err := insta.threadsDestinationID(ctx)
@@ -320,7 +320,7 @@ func (insta *Instagram) UploadPhoto(ctx context.Context, r io.Reader, opts PostO
 	if err != nil {
 		return nil, err
 	}
-	x, err := insta.preparePost(ctx, opts)
+	x, err := insta.preparePost(ctx, opts, p)
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +355,7 @@ func (insta *Instagram) UploadAlbum(ctx context.Context, photos []io.Reader, opt
 		}
 		ps[i] = p
 	}
-	x, err := insta.preparePost(ctx, opts)
+	x, err := insta.preparePost(ctx, opts, ps[0])
 	if err != nil {
 		return nil, err
 	}
@@ -462,14 +462,15 @@ type postSticker struct {
 	TapStateString string  `json:"tap_state_str_id"`
 }
 
-func (insta *Instagram) reshareToStory(ctx context.Context, post *Item, p *photo) error {
+func (insta *Instagram) reshareToStory(ctx context.Context, post *Item, card *storyCard) error {
+	p := card.photo
 	if err := insta.uploadPhoto(ctx, p, "stories", ""); err != nil {
 		return err
 	}
 	pk := strconv.FormatInt(int64(post.Pk), 10)
-	// Box and product_type as the app sent them for a centered single-photo card.
+	// The app sent product_type carousel_container for a single photo too.
 	tap, err := json.Marshal([]postSticker{{
-		X: 0.5, Y: 0.5, Width: 0.2513021, Height: 0.46781716,
+		X: 0.5, Y: 0.5, Width: card.w, Height: card.h,
 		Type: "feed_media", MediaID: pk, MediaOwnerID: strconv.FormatInt(insta.userID(), 10),
 		ProductType: "carousel_container", IsSticker: true, TapStateString: "feed_post_sticker_square",
 	}})
