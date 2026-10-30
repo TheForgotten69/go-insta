@@ -19,7 +19,7 @@ go run ./cmd/httplog session log_http.txt > login.session.json   # from a captur
 IG_PASSWORD=... go run ./cmd/login -user NAME                     # password login (prompts for 2FA)
 IG_PASSWORD=... IG_TOTP_SECRET=... go run ./cmd/login -user NAME  # non-interactive 2FA
 IG_PASSWORD=... go run ./cmd/login -user NAME -log login.log       # also log every response (holds the token)
-go run ./cmd/smoke [-writes] [-highlight]                         # live check
+go run ./cmd/smoke [-writes] [-highlight] [-reel file.mp4]       # live check
 ```
 
 ## Use
@@ -44,6 +44,8 @@ item, err = insta.UploadPhoto(ctx, img, goinsta.PostOptions{
 	ShareToThreads: true, HideLikeCounts: true, HideShareCounts: true, ShareToStory: true,
 })
 paths, err := item.DownloadTo(ctx, "out/")
+
+reel, err := insta.UploadReel(ctx, mp4, goinsta.PostOptions{Caption: "hi"}) // H.264/AAC MP4; Instagram picks the cover
 
 story, err := insta.UploadStory(ctx, img)
 hl, err := insta.CreateHighlight(ctx, "Trips", story) // first item is the cover

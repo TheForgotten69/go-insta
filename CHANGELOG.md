@@ -3,6 +3,17 @@
 All notable changes to this project are documented here. The project uses
 [Semantic Versioning](https://semver.org/) (pre-1.0: a minor bump may break the API).
 
+## [0.5.0] - 2026-10-31
+
+### Features
+
+- `Instagram.UploadReel(ctx, mp4, PostOptions)` posts an MP4 (H.264 video, AAC audio)
+  as a Reel (#6). The size and duration come from the MP4 itself; Instagram picks
+  the cover frame. It waits while Instagram reports "Transcode not finished yet."
+  `PostOptions.ShareToStory` returns `ErrReelStoryShare`.
+- `ErrInvalidVideo` for input that is not an MP4 with a video track.
+- `cmd/smoke -reel file.mp4` posts and deletes a Reel.
+
 ## [0.4.0] - 2026-10-31
 
 ### Features
@@ -121,6 +132,7 @@ First release: an Instagram for Android 453 private API client.
 - Stories, highlights, likes, comments, saves, follows, photo, album and story uploads.
 - `cmd/httplog` for device captures and `cmd/smoke` for live checks.
 
+[0.5.0]: https://github.com/TheForgotten69/go-insta/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/TheForgotten69/go-insta/compare/v0.3.4...v0.4.0
 [0.3.4]: https://github.com/TheForgotten69/go-insta/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/TheForgotten69/go-insta/compare/v0.3.2...v0.3.3
