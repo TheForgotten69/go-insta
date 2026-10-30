@@ -3,6 +3,21 @@
 All notable changes to this project are documented here. The project uses
 [Semantic Versioning](https://semver.org/) (pre-1.0: a minor bump may break the API).
 
+## [0.4.0] - 2026-10-31
+
+### Features
+
+- `Reel.Edit(ctx, HighlightEdit{Title, Cover, Add, Remove})`: the profile's "Edit
+  highlight" save (rename, change cover, add and remove stories in one call).
+- `Reel.Delete`, `Reel.Archive` and `Reel.Unarchive` for highlights.
+- `Reel.CoverMedia` carries a highlight's cover media id and crop.
+- `cmd/smoke -highlight` also edits, archives, unarchives and deletes the highlight.
+
+### Enhancements
+
+- `User.Highlights` pages through `paginated_highlights_tray` like the app, and keeps
+  going past empty pages that still carry a cursor.
+
 ## [0.3.4] - 2026-10-30
 
 ### Enhancements
@@ -106,6 +121,7 @@ First release: an Instagram for Android 453 private API client.
 - Stories, highlights, likes, comments, saves, follows, photo, album and story uploads.
 - `cmd/httplog` for device captures and `cmd/smoke` for live checks.
 
+[0.4.0]: https://github.com/TheForgotten69/go-insta/compare/v0.3.4...v0.4.0
 [0.3.4]: https://github.com/TheForgotten69/go-insta/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/TheForgotten69/go-insta/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/TheForgotten69/go-insta/compare/v0.3.1...v0.3.2

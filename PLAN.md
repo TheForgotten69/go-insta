@@ -1,10 +1,10 @@
 # go-insta: remaining work
 
-Status (2026-10-30, v0.3.3): password login with TOTP 2FA works live (`go run ./cmd/login`).
+Status (2026-10-31, v0.4.0): password login with TOTP 2FA works live (`go run ./cmd/login`).
 `go run ./cmd/smoke -writes` passes 51/51 live: every public method except Login/Logout (reads,
 follow/unfollow, settings toggle, photo/album/story upload with like, save, pin, note, comments,
 archive, download and delete). `-crosspost photo|album` (Threads cross-post, hidden counts, story
-reshare) and `-highlight` (create a highlight, add a story, cleanup) also pass live. Replay tests pass.
+reshare) and `-highlight` (create, add, edit, archive, unarchive, delete) also pass live. Replay tests pass.
 
 Done since 2026-10-28, all verified live:
 - Threads cross-post, hidden like/share counts, post reshare to the story (`PostOptions`).
@@ -22,12 +22,21 @@ The `just` recipes below live in `~/Documents/projects/research/instagram/justfi
 
 ## Features
 
-1. **Reel (video) upload** (issue #6): needs a capture of the app posting a Reel (segmented
-   rupload with `media_type=2`, cover frame, `configure_to_clips`). **[you]**, then **[code]**
-2. **Highlight management**: remove a story from a highlight, delete, rename, change the cover
-   (especially "from camera roll", for a dedicated cover image). `edit_reel` already carries
-   `removed_media_ids`, so removal may only need a live test. Needs a capture for the rest. **[you]**
-   Instagram cuts titles to 16 characters without an error.
+1. **Reel (video) upload** (issue #6): the emulator cannot post one. Waydroid's soft H.264
+   encoder asserts on Surface input unless `ro.hardware.egl=mesa` (NVIDIA venus mode sets
+   `angle`); with that check patched out it still encodes nothing, so the app uploads an empty
+   file. `log_feed_20261031-002406.txt` has the steps before that: `clips_info_for_creation`,
+   `upload_settings/<uuid>`, and `rupload_igvideo/<name>` (offset GET, then POST with
+   `X-Instagram-Rupload-Params` share_type `reels`, `is_clips_video`, `media_type` 2,
+   duration/size, `extract_cover_frame`). Missing: a successful video POST and the publish call
+   (`configure_to_clips`). Next: build those from the documented protocol and verify live
+   with an MP4, or capture on hardware that encodes. **[code]**
+2. **Highlight cover from the camera roll** (a dedicated cover image): not captured; the
+   captured edits only pick a story frame. **[you]** Instagram cuts titles to 16 characters
+   without an error.
+
+Done 2026-10-31 (live): highlight create, add, edit (rename, cover, add/remove), archive,
+unarchive, delete; tray paging through `paginated_highlights_tray`.
 
 ## Login
 

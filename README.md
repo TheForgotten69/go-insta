@@ -48,6 +48,9 @@ paths, err := item.DownloadTo(ctx, "out/")
 story, err := insta.UploadStory(ctx, img)
 hl, err := insta.CreateHighlight(ctx, "Trips", story) // first item is the cover
 err = hl.AddItems(ctx, otherStory)
+err = hl.Edit(ctx, goinsta.HighlightEdit{Title: "Trips 2026", Cover: otherStory, Remove: []*goinsta.Item{story}})
+err = hl.Archive(ctx) // hidden from the profile; Unarchive shows it again
+err = hl.Delete(ctx)
 ```
 
 Pagers: `Timeline()`, `Reels()`, `Collections()`, `Activity()`, `SearchUsers()`,
