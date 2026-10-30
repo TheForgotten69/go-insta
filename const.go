@@ -97,6 +97,8 @@ const (
 	urlConfigure        = "media/configure/"
 	urlConfigureSidecar = "media/configure_sidecar/"
 	urlConfigureStory   = "media/configure_to_story/"
+	urlConfigureClips   = "media/configure_to_clips/?video=1"
+	urlUploadVideo      = "rupload_igvideo/%s" // relative to baseURL
 	urlPDQHash          = "media/update_media_with_pdq_hash_info/"
 )
 
@@ -113,6 +115,8 @@ var (
 	ErrSessionInvalid     = errors.New("session is missing authorization or user id")
 
 	ErrInvalidImage       = errors.New("invalid file type, please use a jpeg or webp image")
+	ErrInvalidVideo       = errors.New("invalid video, please use an mp4 with a video track")
+	ErrReelStoryShare     = errors.New("ShareToStory is not supported for Reels")
 	ErrNoHighlightItems   = errors.New("a highlight needs at least one story item")
 	ErrNotHighlight       = errors.New("reel is not a highlight")
 	ErrCarouselMediaLimit = errors.New("an album takes 2 to 20 photos")

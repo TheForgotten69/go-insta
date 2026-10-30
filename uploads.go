@@ -54,6 +54,14 @@ func newUploadID() string {
 	}
 }
 
+// ruploadIgnored are the app headers the rupload endpoints never carry.
+var ruploadIgnored = append([]string{"X-Bloks-Version-Id", "X-Ig-Android-Id", "X-Ig-App-Locale",
+	"X-Ig-Bloks-Serialize-Payload", "X-Ig-Device-Id", "X-Ig-Device-Locale", "X-Ig-Family-Device-Id",
+	"X-Ig-Is-Adaptive-Ui", "X-Ig-Is-Foldable", "X-Ig-Mapped-Locale", "X-Ig-Timezone-Offset", "X-Ig-Device-Timezone",
+	"X-Ig-Www-Claim", "X-Tigon-Is-Retry", "X-Ig-Bandwidth-Speed-Kbps", "X-Ig-Bandwidth-Totalbytes-B",
+	"X-Ig-Bandwidth-Totaltime-Ms", "X-Ig-Client-Endpoint", "X-Pigeon-Rawclienttime", "X-Pigeon-Session-Id"},
+	bloksHeaders...)
+
 // shareType is "feed" or "stories"; album children pass the album's client_sidecar_id as sessionID.
 func (insta *Instagram) uploadPhoto(ctx context.Context, p *photo, shareType, sessionID string) error {
 	p.uploadID = newUploadID()
@@ -94,18 +102,13 @@ func (insta *Instagram) uploadPhoto(ctx context.Context, p *photo, shareType, se
 		Status   string `json:"status"`
 	}
 	err = insta.callJSON(ctx, &reqOptions{
-		Endpoint:     fmt.Sprintf(urlUploadPhoto, name),
-		OmitAPI:      true,
-		IsPost:       true,
-		DataBytes:    p.data,
-		Priority:     "u=1, i",
-		FriendlyName: "undefined:media-upload",
-		IgnoreHeaders: append([]string{"X-Bloks-Version-Id", "X-Ig-Android-Id", "X-Ig-App-Locale",
-			"X-Ig-Bloks-Serialize-Payload", "X-Ig-Device-Id", "X-Ig-Device-Locale", "X-Ig-Family-Device-Id",
-			"X-Ig-Is-Adaptive-Ui", "X-Ig-Is-Foldable", "X-Ig-Mapped-Locale", "X-Ig-Timezone-Offset", "X-Ig-Device-Timezone",
-			"X-Ig-Www-Claim", "X-Tigon-Is-Retry", "X-Ig-Bandwidth-Speed-Kbps", "X-Ig-Bandwidth-Totalbytes-B",
-			"X-Ig-Bandwidth-Totaltime-Ms", "X-Ig-Client-Endpoint", "X-Pigeon-Rawclienttime", "X-Pigeon-Session-Id"},
-			bloksHeaders...),
+		Endpoint:      fmt.Sprintf(urlUploadPhoto, name),
+		OmitAPI:       true,
+		IsPost:        true,
+		DataBytes:     p.data,
+		Priority:      "u=1, i",
+		FriendlyName:  "undefined:media-upload",
+		IgnoreHeaders: ruploadIgnored,
 		ExtraHeaders: map[string]string{
 			"Content-Type":               "application/octet-stream",
 			"Offset":                     "0",
@@ -183,8 +186,10 @@ type configureMedia struct {
 }
 
 type configureResp struct {
-	Medias []configureMedia `json:"medias"`
-	Status string           `json:"status"`
+	Medias  []configureMedia `json:"medias"`
+	Media   *Item            `json:"media"`
+	Status  string           `json:"status"`
+	Message string           `json:"message"`
 }
 
 func (insta *Instagram) configure(ctx context.Context, endpoint string, payload map[string]any) (*Item, error) {
@@ -207,8 +212,11 @@ func (insta *Instagram) configure(ctx context.Context, endpoint string, payload 
 	if err != nil {
 		return nil, err
 	}
+	if len(resp.Medias) == 0 && resp.Media != nil {
+		resp.Medias = []configureMedia{{MediaDict: resp.Media}}
+	}
 	if len(resp.Medias) == 0 || resp.Medias[0].MediaDict == nil {
-		return nil, fmt.Errorf("%s: no media in response (status %q)", endpoint, resp.Status)
+		return nil, fmt.Errorf("%s: no media in response (status %q: %s)", endpoint, resp.Status, resp.Message)
 	}
 	item := resp.Medias[0].MediaDict
 	if endpoint == urlConfigureSidecar {

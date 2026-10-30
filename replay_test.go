@@ -119,8 +119,10 @@ func (r *replay) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func samePath(fixture, got string) bool {
-	if strings.HasPrefix(fixture, "/rupload_igphoto/") {
-		return strings.HasPrefix(got, "/rupload_igphoto/")
+	for _, upload := range []string{"/rupload_igphoto/", "/rupload_igvideo/"} {
+		if strings.HasPrefix(fixture, upload) {
+			return strings.HasPrefix(got, upload)
+		}
 	}
 	return fixture == got
 }
