@@ -56,7 +56,7 @@ func main() {
 	pause := flag.Duration("pause", 2*time.Second, "delay between calls")
 	writes := flag.Bool("writes", false, "also run reversible writes on your own account")
 	albumSize := flag.Int("album", 2, "photos in the -writes album")
-	crosspost := flag.Bool("crosspost", false, "post a photo shared to Threads and the story with hidden counts, then delete it (the Threads copy stays)")
+	crosspost := flag.String("crosspost", "", "photo or album: post it shared to Threads and the story with hidden counts, then delete it (the Threads copy stays)")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -96,8 +96,8 @@ func main() {
 		writeAlbum(r, insta, dir, *albumSize)
 		writeStory(r, insta)
 	}
-	if *crosspost {
-		writeCrosspost(r, insta)
+	if *crosspost != "" {
+		writeCrosspost(r, insta, *crosspost)
 	}
 
 	if err := insta.ExportSession(*session); err != nil {
@@ -468,21 +468,32 @@ func writeStory(r *runner, insta *goinsta.Instagram) {
 	r.step("item.Delete (story)", func() (string, error) { return story.ID, story.Delete(ctx) })
 }
 
-func writeCrosspost(r *runner, insta *goinsta.Instagram) {
+func writeCrosspost(r *runner, insta *goinsta.Instagram, kind string) {
 	ctx := r.ctx
+	opts := goinsta.PostOptions{
+		Caption:        "go-insta crosspost smoke (" + kind + ")",
+		ShareToThreads: true, HideLikeCounts: true, HideShareCounts: true,
+		StoryImage: storyJPEG(),
+	}
+	upload := func() (*goinsta.Item, error) { return insta.UploadPhoto(ctx, testJPEG(80), opts) }
+	switch kind {
+	case "photo":
+	case "album":
+		upload = func() (*goinsta.Item, error) {
+			return insta.UploadAlbum(ctx, []io.Reader{testJPEG(0), testJPEG(80), testJPEG(160)}, opts)
+		}
+	default:
+		fail("crosspost", fmt.Errorf("unknown kind %q, want photo or album", kind))
+	}
 	var post *goinsta.Item
-	r.step("UploadPhoto (Threads+story)", func() (string, error) {
+	r.step("crosspost "+kind+" (Threads+story)", func() (string, error) {
 		var err error
-		post, err = insta.UploadPhoto(ctx, testJPEG(80), goinsta.PostOptions{
-			Caption:        "go-insta crosspost smoke",
-			ShareToThreads: true, HideLikeCounts: true, HideShareCounts: true,
-			StoryImage: storyJPEG(),
-		})
+		post, err = upload()
 		if post == nil {
 			return "", err
 		}
-		summary := fmt.Sprintf("%s code=%s fbid_v2=%d likes_hidden=%v shares_hidden=%v",
-			post.ID, post.Code, insta.Session().FbIDV2, post.LikeViewCountDisabled, post.ShareCountDisabled)
+		summary := fmt.Sprintf("%s code=%s children=%d fbid_v2=%d likes_hidden=%v shares_hidden=%v",
+			post.ID, post.Code, len(post.CarouselMedia), insta.Session().FbIDV2, post.LikeViewCountDisabled, post.ShareCountDisabled)
 		if err == nil && (!post.LikeViewCountDisabled || !post.ShareCountDisabled) {
 			err = errors.New("counts not hidden: " + summary)
 		}
