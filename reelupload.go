@@ -61,7 +61,7 @@ func (insta *Instagram) UploadReel(ctx context.Context, r io.Reader, opts PostOp
 // then it answers 202 "Transcode not finished yet." (6 s video: one retry).
 var transcodeWait = 3 * time.Second
 
-const transcodeTries = 40
+const transcodeTries = 100 // 5 minutes; a 45 s Reel finished well within 2
 
 func (insta *Instagram) configureReel(ctx context.Context, payload map[string]any) (*Item, error) {
 	for range transcodeTries {
