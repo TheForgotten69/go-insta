@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -82,8 +83,9 @@ func mergeIncremental(body []byte) ([]byte, error) {
 	}
 	for _, line := range lines[1:] {
 		var patch struct {
-			Path []any `json:"path"`
-			Data any   `json:"data"`
+			Path   []any          `json:"path"`
+			Data   any            `json:"data"`
+			Errors []GraphQLError `json:"errors"`
 		}
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
@@ -91,11 +93,29 @@ func mergeIncremental(body []byte) ([]byte, error) {
 		if err := decodeNumber(line, &patch); err != nil {
 			return nil, err
 		}
+		if patch.Data == nil {
+			if len(patch.Errors) > 0 {
+				return nil, &patch.Errors[0]
+			}
+			continue
+		}
 		if err := applyPatch(root.Data, patch.Path, patch.Data); err != nil {
 			return nil, err
 		}
 	}
 	return json.Marshal(root)
+}
+
+// GraphQLError is the first error of a response part that came back without
+// data. Instagram answers 1357005 for a private account the viewer does not follow.
+type GraphQLError struct {
+	Code    int    `json:"code"`
+	Summary string `json:"summary"`
+	Message string `json:"message"`
+}
+
+func (e *GraphQLError) Error() string {
+	return fmt.Sprintf("graphql error %d: %s: %s", e.Code, e.Summary, e.Message)
 }
 
 func decodeNumber(b []byte, v any) error {
@@ -163,6 +183,9 @@ func (user *User) Posts() *Pager[*Item] {
 			vars["request_media_chunk"] = false
 		}
 		body, err := user.insta.graphQL(ctx, "IGProfileTimelineQuery", docProfileTimeline, "xdt_api__v1__profile_timeline", "fetch", vars)
+		if gqlErr := (*GraphQLError)(nil); user.IsPrivate && errors.As(err, &gqlErr) {
+			err = fmt.Errorf("%w: %w", ErrPrivateAccount, err)
+		}
 		if err != nil {
 			return nil, "", err
 		}

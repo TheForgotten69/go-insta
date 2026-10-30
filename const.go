@@ -114,8 +114,9 @@ var (
 	ErrNotHighlight       = errors.New("reel is not a highlight")
 	ErrCarouselMediaLimit = errors.New("an album takes 2 to 20 photos")
 
-	ErrNoMore        = errors.New("no more posts available, page end has been reached")
-	ErrMediaDeleted  = errors.New("sorry, this media has been deleted")
-	ErrNoMedia       = errors.New("failed to download, no media found")
-	ErrEmptyResponse = errors.New("empty response body")
+	ErrPrivateAccount = errors.New("account is private and not followed")
+	ErrNoMore         = errors.New("no more posts available, page end has been reached")
+	ErrMediaDeleted   = errors.New("sorry, this media has been deleted")
+	ErrNoMedia        = errors.New("failed to download, no media found")
+	ErrEmptyResponse  = errors.New("empty response body")
 )

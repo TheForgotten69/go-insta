@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"image"
 	"image/jpeg"
 	"io"
@@ -986,6 +988,23 @@ func TestReels(t *testing.T) {
 	checkRequest(t, fixture(t, "clips_seen"), r.sent[1])
 	if got := r.sent[1].payload["impressions"]; got != `["4017333050152331980"]` {
 		t.Errorf("impressions = %v", got)
+	}
+}
+
+func TestProfilePostsPrivate(t *testing.T) {
+	insta, r := newReplay(t, "profile_timeline")
+	gqlErr := `{"message":"A server error field_exception occured. Check server logs for details.","code":1357005,"summary":"Your Request Couldn't be Processed","path":["%s"]}`
+	r.fixtures[0].RespBody = strings.Join([]string{
+		`{"data":{"__typename":"Query","tl":{"_is__TOnXDTProfileFeedDict__0":"XDTProfileFeedDict"}},"extensions":{"is_final":false}}`,
+		`{"label":"ClientHintsResponse__force_flush","path":["tl"],"data":{"client_hints":null},"errors":[` + fmt.Sprintf(gqlErr, "client_hints") + `]}`,
+		`{"label":"ProfileTimelineFragment__force_flush","path":["tl"],"errors":[` + fmt.Sprintf(gqlErr, "profile_grid_items") + `],"extensions":{"is_final":true}}`,
+	}, "\r\n")
+	u := insta.NewUser(210052066)
+	u.IsPrivate = true
+	err := u.Posts().Next(t.Context())
+	var ge *GraphQLError
+	if !errors.Is(err, ErrPrivateAccount) || !errors.As(err, &ge) || ge.Code != 1357005 {
+		t.Fatalf("err = %v, want ErrPrivateAccount wrapping graphql 1357005", err)
 	}
 }
 
