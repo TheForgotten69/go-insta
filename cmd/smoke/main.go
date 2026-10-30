@@ -56,6 +56,7 @@ func main() {
 	pause := flag.Duration("pause", 2*time.Second, "delay between calls")
 	writes := flag.Bool("writes", false, "also run reversible writes on your own account")
 	albumSize := flag.Int("album", 2, "photos in the -writes album")
+	crosspost := flag.Bool("crosspost", false, "post a photo shared to Threads and the story with hidden counts, then delete it (the Threads copy stays)")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -94,6 +95,9 @@ func main() {
 		writePost(r, insta)
 		writeAlbum(r, insta, dir, *albumSize)
 		writeStory(r, insta)
+	}
+	if *crosspost {
+		writeCrosspost(r, insta)
 	}
 
 	if err := insta.ExportSession(*session); err != nil {
@@ -462,6 +466,67 @@ func writeStory(r *runner, insta *goinsta.Instagram) {
 	})
 	r.step("item.LikeStory (own)", func() (string, error) { return "", story.LikeStory(ctx) })
 	r.step("item.Delete (story)", func() (string, error) { return story.ID, story.Delete(ctx) })
+}
+
+func writeCrosspost(r *runner, insta *goinsta.Instagram) {
+	ctx := r.ctx
+	var post *goinsta.Item
+	r.step("UploadPhoto (Threads+story)", func() (string, error) {
+		var err error
+		post, err = insta.UploadPhoto(ctx, testJPEG(80), goinsta.PostOptions{
+			Caption:        "go-insta crosspost smoke",
+			ShareToThreads: true, HideLikeCounts: true, HideShareCounts: true,
+			StoryImage: storyJPEG(),
+		})
+		if post == nil {
+			return "", err
+		}
+		summary := fmt.Sprintf("%s code=%s fbid_v2=%d likes_hidden=%v shares_hidden=%v",
+			post.ID, post.Code, insta.Session().FbIDV2, post.LikeViewCountDisabled, post.ShareCountDisabled)
+		if err == nil && (!post.LikeViewCountDisabled || !post.ShareCountDisabled) {
+			err = errors.New("counts not hidden: " + summary)
+		}
+		return summary, err
+	})
+	if post == nil {
+		return
+	}
+	defer r.step("item.Delete (crosspost)", func() (string, error) { return post.ID, post.Delete(ctx) })
+
+	r.step("own story reshare", func() (string, error) {
+		reel, err := insta.Account.Stories(ctx)
+		if err != nil {
+			return "", err
+		}
+		if len(reel.Items) == 0 {
+			return "", errors.New("no story in own reel")
+		}
+		story := reel.Items[len(reel.Items)-1]
+		summary := fmt.Sprintf("%s, %d feed-post stickers", story.ID, len(story.StoryFeedMedia))
+		if len(story.StoryFeedMedia) == 0 {
+			err = errors.New("newest story has no post sticker: " + summary)
+		}
+		return summary, errors.Join(err, story.Delete(ctx))
+	})
+}
+
+// storyJPEG is a 1080x1920 frame with the post card centered, as the app renders it.
+func storyJPEG() io.Reader {
+	img := image.NewRGBA(image.Rect(0, 0, 1080, 1920))
+	for y := range 1920 {
+		for x := range 1080 {
+			c := color.RGBA{30, 30, 40, 255}
+			if x >= 270 && x < 810 && y >= 690 && y < 1230 {
+				c = color.RGBA{uint8(x/5) + 80, uint8(y / 8), 80, 255}
+			}
+			img.Set(x, y, c)
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
+		fail("jpeg", err)
+	}
+	return &buf
 }
 
 func lastIndex(items []*goinsta.Item) int {

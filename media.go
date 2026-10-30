@@ -49,6 +49,7 @@ type Item struct {
 	Caption               Caption   `json:"caption"`
 	CaptionIsEdited       bool      `json:"caption_is_edited"`
 	LikeViewCountDisabled bool      `json:"like_and_view_counts_disabled"`
+	ShareCountDisabled    bool      `json:"share_count_disabled"`
 	FundraiserTag         struct {
 		HasStandaloneFundraiser bool `json:"has_standalone_fundraiser"`
 	} `json:"fundraiser_tag"`

@@ -230,6 +230,8 @@ type Session struct {
 	TimezoneOffset string `json:"timezone_offset"`
 	TimezoneName   string `json:"timezone_name,omitempty"`
 	Locale         string `json:"locale"`
+	// FbIDV2 is the account's fbid_v2, the Threads cross-post destination.
+	FbIDV2 int64 `json:"fbid_v2,omitempty"`
 
 	PasswordPubKey string `json:"password_pub_key,omitempty"`
 	PasswordKeyID  string `json:"password_key_id,omitempty"`

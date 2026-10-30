@@ -6,9 +6,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/jpeg"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -819,6 +821,81 @@ func TestUploadStory(t *testing.T) {
 		f.ReqHeaders[k] = fixture(t, "configure").ReqHeaders[k]
 	}
 	checkRequest(t, f, r.sent[1])
+}
+
+// withConfigureHeaders swaps in the older build's configure headers: the
+// 2026-10-30 capture comes from a build that sends a different header set.
+func withConfigureHeaders(t *testing.T, name string) httplog.Entry {
+	f := fixture(t, name)
+	friendly := f.ReqHeaders["x-fb-friendly-name"]
+	f.ReqHeaders = maps.Clone(fixture(t, "configure").ReqHeaders)
+	f.ReqHeaders["x-fb-friendly-name"] = friendly
+	return f
+}
+
+func TestUploadPhotoThreadsStory(t *testing.T) {
+	insta, r := newReplay(t, "user_info", "rupload_feed", "configure_threads", "rupload_story_reshare", "configure_story_reshare")
+	it, err := insta.UploadPhoto(t.Context(), testJPEG(t, 1080, 1350), PostOptions{
+		ShareToThreads: true, HideLikeCounts: true, HideShareCounts: true, StoryImage: testJPEG(t, 1080, 1920),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.sent) != 5 {
+		t.Fatalf("sent %d requests, want 5", len(r.sent))
+	}
+	if p := r.sent[0].req.URL.Path; p != "/api/v1/users/42865264907/info/" {
+		t.Errorf("fbid lookup path = %s", p)
+	}
+
+	post := r.sent[2].payload
+	checkRequest(t, withConfigureHeaders(t, "configure_threads"), r.sent[2])
+	for k, want := range map[string]any{
+		"share_to_threads": "1", "share_to_threads_destination_id": "17841442747228158",
+		"like_and_view_counts_disabled": "1", "share_count_disabled": "1", "is_auto_resharing_to_story": "1",
+	} {
+		if post[k] != want {
+			t.Errorf("%s = %v, want %v", k, post[k], want)
+		}
+	}
+	if b, ok := post["share_to_threads_validation_bypass"].([]any); !ok || len(b) != 1 || b[0] != "AUTO_CROSSPOST_SETTING" {
+		t.Errorf("validation bypass = %v", post["share_to_threads_validation_bypass"])
+	}
+	if it.Code != "DfH4vtLNKw1" {
+		t.Errorf("post code = %q", it.Code)
+	}
+
+	var rp map[string]string
+	_ = json.Unmarshal([]byte(r.sent[3].req.Header.Get("X-Instagram-Rupload-Params")), &rp)
+	if rp["share_type"] != "stories" {
+		t.Errorf("story rupload share_type = %q", rp["share_type"])
+	}
+	story := r.sent[4].payload
+	checkRequest(t, withConfigureHeaders(t, "configure_story_reshare"), r.sent[4])
+	if story["reshared_media_id"] != "4019430761377868853" || story["source_type"] != "feed_reshare" {
+		t.Errorf("reshare = %v from %v", story["reshared_media_id"], story["source_type"])
+	}
+	var gotTap, wantTap []map[string]any
+	_ = json.Unmarshal([]byte(story["tap_models"].(string)), &gotTap)
+	_ = json.Unmarshal([]byte(fixture(t, "configure_story_reshare").ReqSigned["tap_models"].(string)), &wantTap)
+	if !reflect.DeepEqual(gotTap, wantTap) {
+		t.Errorf("tap_models differ:\n got %v\nwant %v", gotTap, wantTap)
+	}
+
+	if s := insta.Session(); s.FbIDV2 != 17841442747228158 {
+		t.Errorf("session fbid_v2 = %d", s.FbIDV2)
+	}
+}
+
+func TestUploadPhotoBadStoryImage(t *testing.T) {
+	insta, r := newReplay(t)
+	_, err := insta.UploadPhoto(t.Context(), testJPEG(t, 10, 10), PostOptions{StoryImage: strings.NewReader("not an image")})
+	if !errors.Is(err, ErrInvalidImage) {
+		t.Errorf("err = %v, want ErrInvalidImage", err)
+	}
+	if len(r.sent) != 0 {
+		t.Errorf("sent %d requests before rejecting the story image", len(r.sent))
+	}
 }
 
 func TestReels(t *testing.T) {

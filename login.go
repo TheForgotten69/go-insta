@@ -687,7 +687,9 @@ func (insta *Instagram) applyLoginResponse(body []byte) error {
 	}
 	if m := reDSID.FindSubmatch(flat); m != nil {
 		if id, err := strconv.ParseInt(string(m[1]), 10, 64); err == nil {
-			insta.uid.Store(id)
+			if insta.uid.Swap(id) != id {
+				insta.fbid.Store(0)
+			}
 			insta.Account.ID = Int64(id)
 		}
 	}

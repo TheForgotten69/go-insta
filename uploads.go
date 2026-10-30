@@ -226,18 +226,101 @@ func (insta *Instagram) configure(ctx context.Context, endpoint string, payload 
 // without a caption.
 type PostOptions struct {
 	Caption string
+	// ShareToThreads cross-posts to the Threads profile linked to the account.
+	ShareToThreads bool
+	// HideLikeCounts hides the like and view counts.
+	HideLikeCounts  bool
+	HideShareCounts bool
+	// StoryImage, when set, also shares the post to the story with this JPEG or
+	// WebP image, which the app renders as the post card centered on the frame.
+	// If only the story share fails, the post is returned with the error.
+	StoryImage io.Reader
 }
 
-func (o PostOptions) apply(payload map[string]any) {
-	if o.Caption != "" {
-		payload["caption"] = o.Caption
+// postExtras are PostOptions resolved before anything is uploaded, so a bad
+// story image or a failed lookup never leaves a half-published post.
+type postExtras struct {
+	opts  PostOptions
+	fbid  int64
+	story *photo
+}
+
+func (insta *Instagram) preparePost(ctx context.Context, opts PostOptions) (*postExtras, error) {
+	x := &postExtras{opts: opts}
+	if opts.StoryImage != nil {
+		p, err := readPhoto(opts.StoryImage)
+		if err != nil {
+			return nil, fmt.Errorf("story image: %w", err)
+		}
+		x.story = p
 	}
+	if opts.ShareToThreads {
+		id, err := insta.threadsDestinationID(ctx)
+		if err != nil {
+			return nil, err
+		}
+		x.fbid = id
+	}
+	return x, nil
+}
+
+func (x *postExtras) apply(payload map[string]any) {
+	if x.opts.Caption != "" {
+		payload["caption"] = x.opts.Caption
+	}
+	if x.opts.ShareToThreads {
+		payload["share_to_threads"] = "1"
+		payload["share_to_threads_destination_id"] = strconv.FormatInt(x.fbid, 10)
+		payload["share_to_threads_validation_bypass"] = []string{"AUTO_CROSSPOST_SETTING"}
+	}
+	if x.opts.HideLikeCounts {
+		payload["like_and_view_counts_disabled"] = "1"
+	}
+	if x.opts.HideShareCounts {
+		payload["share_count_disabled"] = "1"
+	}
+	if x.story != nil {
+		payload["is_auto_resharing_to_story"] = "1"
+	}
+}
+
+// publish configures the post, then reshares it to the story when asked.
+func (insta *Instagram) publish(ctx context.Context, endpoint string, payload map[string]any, x *postExtras) (*Item, error) {
+	x.apply(payload)
+	item, err := insta.configure(ctx, endpoint, payload)
+	if err != nil || x.story == nil {
+		return item, err
+	}
+	if err := insta.reshareToStory(ctx, item, x.story); err != nil {
+		return item, fmt.Errorf("post %s published, story share failed: %w", item.Code, err)
+	}
+	return item, nil
+}
+
+// threadsDestinationID is the account's fbid_v2, looked up once per session.
+func (insta *Instagram) threadsDestinationID(ctx context.Context) (int64, error) {
+	if id := insta.fbid.Load(); id != 0 {
+		return id, nil
+	}
+	u := insta.NewUser(insta.userID())
+	if err := u.Info(ctx); err != nil {
+		return 0, fmt.Errorf("threads destination: %w", err)
+	}
+	if u.FbIdV2 == 0 {
+		return 0, errors.New("threads destination: account has no fbid_v2")
+	}
+	insta.fbid.Store(int64(u.FbIdV2))
+	return int64(u.FbIdV2), nil
 }
 
 // UploadPhoto posts a single JPEG or WebP image to the feed. Instagram stores
 // the pixels as uploaded, so crop to the wanted aspect ratio first.
 func (insta *Instagram) UploadPhoto(ctx context.Context, r io.Reader, opts PostOptions) (*Item, error) {
 	p, err := readPhoto(r)
+	if err != nil {
+		return nil, err
+	}
+	x, err := insta.preparePost(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -251,8 +334,7 @@ func (insta *Instagram) UploadPhoto(ctx context.Context, r io.Reader, opts PostO
 	payload["creation_tool_info"] = "[]"
 	payload["app_attribution_android_namespace"] = ""
 	payload["stacked_timeline_metadata"] = stackedTimeline(p.uploadID)
-	opts.apply(payload)
-	return insta.configure(ctx, urlConfigure, payload)
+	return insta.publish(ctx, urlConfigure, payload, x)
 }
 
 const maxAlbumPhotos = 20
@@ -272,6 +354,10 @@ func (insta *Instagram) UploadAlbum(ctx context.Context, photos []io.Reader, opt
 			return nil, fmt.Errorf("photo %d: %w", i+1, err)
 		}
 		ps[i] = p
+	}
+	x, err := insta.preparePost(ctx, opts)
+	if err != nil {
+		return nil, err
 	}
 	sidecarID := newUploadID()
 	errs := make([]error, len(ps))
@@ -321,8 +407,7 @@ func (insta *Instagram) UploadAlbum(ctx context.Context, photos []io.Reader, opt
 	payload["stacked_timeline_metadata"] = []map[string]string{{"action": "ADD", "surface_element": "STACKED_TIMELINE", "target": "MULTI_PHOTO"}}
 	payload["original_width"] = "0"
 	payload["original_height"] = "0"
-	opts.apply(payload)
-	return insta.configure(ctx, urlConfigureSidecar, payload)
+	return insta.publish(ctx, urlConfigureSidecar, payload, x)
 }
 
 // UploadStory posts a JPEG or WebP image to the story.
@@ -334,6 +419,15 @@ func (insta *Instagram) UploadStory(ctx context.Context, r io.Reader) (*Item, er
 	if err := insta.uploadPhoto(ctx, p, "stories", ""); err != nil {
 		return nil, err
 	}
+	payload := insta.storyBase(p)
+	payload["capture_type"] = "normal"
+	payload["composition_id"] = generateUUID()
+	payload["media_transformation_info"] = fmt.Sprintf(
+		`{"width":"%d","height":"%d","x_transform":"0","y_transform":"0","zoom":"1.0","rotation":"0.0","background_coverage":100}`, p.w, p.h)
+	return insta.configure(ctx, urlConfigureStory, payload)
+}
+
+func (insta *Instagram) storyBase(p *photo) map[string]any {
 	now := strconv.FormatInt(time.Now().Unix(), 10)
 	payload := insta.configureBase(p.uploadID)
 	payload["edits"] = map[string]any{"crop_original_size": []int{p.w, p.h}, "filter_type": 0, "filter_strength": 1}
@@ -342,14 +436,56 @@ func (insta *Instagram) UploadStory(ctx context.Context, r io.Reader) (*Item, er
 	payload["original_height"] = strconv.Itoa(p.h)
 	payload["original_media_type"] = "1"
 	payload["configure_mode"] = "1"
-	payload["capture_type"] = "normal"
 	payload["creation_surface"] = "camera"
 	payload["camera_position"] = "unknown"
 	payload["client_shared_at"] = now
 	payload["client_timestamp"] = now
-	payload["composition_id"] = generateUUID()
 	payload["supported_capabilities_new"] = supportedCapabilities
-	payload["media_transformation_info"] = fmt.Sprintf(
-		`{"width":"%d","height":"%d","x_transform":"0","y_transform":"0","zoom":"1.0","rotation":"0.0","background_coverage":100}`, p.w, p.h)
-	return insta.configure(ctx, urlConfigureStory, payload)
+	return payload
+}
+
+// postSticker is the tappable post card on a reshared story.
+type postSticker struct {
+	X              float64 `json:"x"`
+	Y              float64 `json:"y"`
+	Z              int     `json:"z"`
+	Width          float64 `json:"width"`
+	Height         float64 `json:"height"`
+	Rotation       float64 `json:"rotation"`
+	Type           string  `json:"type"`
+	MediaID        string  `json:"media_id"`
+	MediaOwnerID   string  `json:"media_owner_id"`
+	CarouselChild  string  `json:"carousel_share_child_media_id"`
+	ProductType    string  `json:"product_type"`
+	IsSticker      bool    `json:"is_sticker"`
+	TapState       int     `json:"tap_state"`
+	TapStateString string  `json:"tap_state_str_id"`
+}
+
+func (insta *Instagram) reshareToStory(ctx context.Context, post *Item, p *photo) error {
+	if err := insta.uploadPhoto(ctx, p, "stories", ""); err != nil {
+		return err
+	}
+	pk := strconv.FormatInt(int64(post.Pk), 10)
+	// Box and product_type as the app sent them for a centered single-photo card.
+	tap, err := json.Marshal([]postSticker{{
+		X: 0.5, Y: 0.5, Width: 0.2513021, Height: 0.46781716,
+		Type: "feed_media", MediaID: pk, MediaOwnerID: strconv.FormatInt(insta.userID(), 10),
+		ProductType: "carousel_container", IsSticker: true, TapStateString: "feed_post_sticker_square",
+	}})
+	if err != nil {
+		return err
+	}
+	payload := insta.storyBase(p)
+	payload["capture_type"] = "unknown"
+	delete(payload, "camera_session_id")
+	payload["source_type"] = "feed_reshare"
+	payload["reshared_media_id"] = pk
+	payload["is_auto_resharing_to_story"] = "1"
+	payload["imported_taken_at"] = payload["client_shared_at"]
+	payload["has_camera_metadata"] = "0"
+	payload["has_original_sound"] = "1"
+	payload["tap_models"] = string(tap)
+	_, err = insta.configure(ctx, urlConfigureStory, payload)
+	return err
 }

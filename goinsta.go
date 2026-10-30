@@ -38,6 +38,7 @@ type Instagram struct {
 	feedSessionID string
 
 	uid           atomic.Int64
+	fbid          atomic.Int64
 	c             atomic.Pointer[http.Client]
 	headerOptions sync.Map
 
@@ -122,6 +123,7 @@ func New(s Session) (*Instagram, error) {
 	}
 	insta.baseHeader = insta.staticHeaders()
 	insta.uid.Store(s.UserID)
+	insta.fbid.Store(s.FbIDV2)
 	insta.c.Store(&http.Client{Transport: directTransport()})
 	for k, v := range map[string]string{
 		"Authorization":  s.Authorization,
@@ -170,6 +172,7 @@ func (insta *Instagram) header(k string) string {
 func (insta *Instagram) Session() Session {
 	s := insta.sess
 	s.UserID = insta.userID()
+	s.FbIDV2 = insta.fbid.Load()
 	s.Authorization = insta.header("Authorization")
 	s.Mid = insta.header("X-Mid")
 	s.WWWClaim = insta.header("X-Ig-Www-Claim")
