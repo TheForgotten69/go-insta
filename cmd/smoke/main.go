@@ -56,7 +56,8 @@ func main() {
 	pause := flag.Duration("pause", 2*time.Second, "delay between calls")
 	writes := flag.Bool("writes", false, "also run reversible writes on your own account")
 	albumSize := flag.Int("album", 2, "photos in the -writes album")
-	keep := flag.Bool("keep", false, "with -crosspost or -highlight, leave what it made up")
+	keep := flag.Bool("keep", false, "with -crosspost, -highlight or -reel, leave what it made up")
+	reel := flag.String("reel", "", "MP4 to post as a Reel, then delete")
 	crosspost := flag.String("crosspost", "", "photo or album: post it shared to Threads and the story with hidden counts, then delete it (the Threads copy stays)")
 	highlight := flag.Bool("highlight", false, "post two stories; create, add to, edit, archive, unarchive and delete a highlight; delete the stories")
 	flag.Parse()
@@ -103,6 +104,9 @@ func main() {
 	}
 	if *highlight {
 		writeHighlight(r, insta, *keep)
+	}
+	if *reel != "" {
+		writeReel(r, insta, *reel, *keep)
 	}
 
 	if err := insta.ExportSession(*session); err != nil {
@@ -529,6 +533,27 @@ func writeCrosspost(r *runner, insta *goinsta.Instagram, kind string, keep bool)
 		}
 		return summary, errors.Join(err, story.Delete(ctx))
 	})
+}
+
+func writeReel(r *runner, insta *goinsta.Instagram, file string, keep bool) {
+	ctx := r.ctx
+	var it *goinsta.Item
+	r.step("UploadReel", func() (string, error) {
+		f, err := os.Open(file)
+		if err != nil {
+			return "", err
+		}
+		defer f.Close()
+		it, err = insta.UploadReel(ctx, f, goinsta.PostOptions{Caption: "go-insta reel smoke"})
+		if err != nil {
+			return "", err
+		}
+		return expect(it.Code != "" && it.ProductType == "clips" && it.VideoDuration > 0,
+			"%s code=%s product=%s duration=%.2fs", it.ID, it.Code, it.ProductType, it.VideoDuration)
+	})
+	if it != nil && !keep {
+		r.step("item.Delete (reel)", func() (string, error) { return it.ID, it.Delete(ctx) })
+	}
 }
 
 func writeHighlight(r *runner, insta *goinsta.Instagram, keep bool) {
