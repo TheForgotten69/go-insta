@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. The project uses
 [Semantic Versioning](https://semver.org/) (pre-1.0: a minor bump may break the API).
 
+## [0.3.3] - 2026-10-30
+
+### Enhancements
+
+- Request headers match what the app has sent since 2026-10-28 (same app version,
+  453.0.0.55.79): `x-bloks-prism-extended-palette-gray` and `-polish-enabled` are
+  `true`; logged-in REST requests add `x-ig-device-languages` and
+  `x-ig-device-timezone`, GraphQL adds only the timezone, uploads and logged-out
+  requests add neither.
+
 ## [0.3.2] - 2026-10-30
 
 ### Bug fixes
@@ -81,6 +91,7 @@ First release: an Instagram for Android 453 private API client.
 - Stories, highlights, likes, comments, saves, follows, photo, album and story uploads.
 - `cmd/httplog` for device captures and `cmd/smoke` for live checks.
 
+[0.3.3]: https://github.com/TheForgotten69/go-insta/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/TheForgotten69/go-insta/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/TheForgotten69/go-insta/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/TheForgotten69/go-insta/compare/v0.2.0...v0.3.0
