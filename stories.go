@@ -82,28 +82,47 @@ func (user *User) Stories(ctx context.Context) (*Reel, error) {
 	return user.insta.fetchStories(ctx, int64(user.ID))
 }
 
-// Highlights returns the highlight covers; LoadReels fills their items.
+// Highlights returns every highlight cover, following the tray cursor past the
+// first 10; LoadReels fills their items.
 func (user *User) Highlights(ctx context.Context) ([]*Reel, error) {
-	tray := &Tray{}
-	err := user.insta.callJSON(ctx, &reqOptions{
-		Endpoint:     fmt.Sprintf(urlUserHighlights, user.ID),
-		Stream:       true,
-		ExtraHeaders: map[string]string{"X-Ig-Accept-Hint": "feed"},
-		Query: map[string]string{
+	var reels []*Reel
+	cursor := ""
+	for {
+		q := map[string]string{
 			"check_highlights_subtab_gating":        "false",
 			"fetch_high_res_cover_image":            "true",
 			"max_highlights_to_fetch_on_pagination": "10",
 			"supported_capabilities_new":            supportedCapabilities,
-		},
-	}, tray)
-	if err != nil {
-		return nil, err
+		}
+		if cursor != "" {
+			q["cursor"] = cursor
+		}
+		var page struct {
+			Reels  []*Reel `json:"tray"`
+			Cursor string  `json:"cursor"`
+		}
+		err := user.insta.callJSON(ctx, &reqOptions{
+			Endpoint:     fmt.Sprintf(urlUserHighlights, user.ID),
+			Stream:       true,
+			ExtraHeaders: map[string]string{"X-Ig-Accept-Hint": "feed"},
+			Query:        q,
+		}, &page)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range page.Reels {
+			r.setValues(user.insta)
+		}
+		reels = append(reels, page.Reels...)
+		if page.Cursor == "" || page.Cursor == cursor {
+			return reels, nil
+		}
+		cursor = page.Cursor
 	}
-	tray.set(user.insta)
-	return tray.Reels, nil
 }
 
 // CreateHighlight makes a highlight from story items; the first is the cover.
+// Instagram silently cuts the title to 16 characters; the returned Title shows it.
 func (insta *Instagram) CreateHighlight(ctx context.Context, title string, items ...*Item) (*Reel, error) {
 	if len(items) == 0 {
 		return nil, ErrNoHighlightItems

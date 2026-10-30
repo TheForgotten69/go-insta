@@ -3,6 +3,13 @@
 All notable changes to this project are documented here. The project uses
 [Semantic Versioning](https://semver.org/) (pre-1.0: a minor bump may break the API).
 
+## [0.3.1] - 2026-10-30
+
+### Bug fixes
+
+- `User.Highlights` follows the tray cursor, so accounts with more than 10
+  highlights get all of them instead of the first 10.
+
 ## [0.3.0] - 2026-10-30
 
 ### Features
@@ -63,6 +70,7 @@ First release: an Instagram for Android 453 private API client.
 - Stories, highlights, likes, comments, saves, follows, photo, album and story uploads.
 - `cmd/httplog` for device captures and `cmd/smoke` for live checks.
 
+[0.3.1]: https://github.com/TheForgotten69/go-insta/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/TheForgotten69/go-insta/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/TheForgotten69/go-insta/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/TheForgotten69/go-insta/compare/v0.1.0...v0.1.1

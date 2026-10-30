@@ -435,6 +435,32 @@ func TestStoriesAndHighlights(t *testing.T) {
 	}
 }
 
+func TestHighlightsFollowCursor(t *testing.T) {
+	insta, r := newReplay(t, "highlights_tray", "highlights_tray")
+	first := strings.ReplaceAll(r.fixtures[0].RespBody, `"cursor":null`, `"cursor":"C1"`)
+	if first == r.fixtures[0].RespBody {
+		t.Fatal("fixture has no null cursor to replace")
+	}
+	r.fixtures[0].RespBody = first
+	hl, err := insta.NewUser(62759345752).Highlights(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.sent) != 2 {
+		t.Fatalf("sent %d requests, want 2", len(r.sent))
+	}
+	checkRequest(t, fixture(t, "highlights_tray"), r.sent[0])
+	if c := r.sent[0].req.URL.Query().Get("cursor"); c != "" {
+		t.Errorf("first page sent cursor %q", c)
+	}
+	if c := r.sent[1].req.URL.Query().Get("cursor"); c != "C1" {
+		t.Errorf("second page cursor = %q, want C1", c)
+	}
+	if len(hl) != 2 || hl[1].insta == nil {
+		t.Errorf("got %d highlights, want one per page", len(hl))
+	}
+}
+
 func TestCreateAndEditHighlight(t *testing.T) {
 	insta, r := newReplay(t, "highlight_create", "highlight_edit")
 	cover := testItem(insta, "4019477520007509117_42865264907")
