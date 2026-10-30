@@ -75,3 +75,47 @@ func TestCurrentBuildProfile(t *testing.T) {
 		t.Errorf("network session headers malformed: %v", h)
 	}
 }
+
+// Measured over the 2026-10-28 and 2026-10-30 captures: logged-in REST requests
+// carry the palette flags as true plus device languages and timezone; GraphQL
+// keeps only the timezone; uploads and logged-out requests carry neither.
+func TestDeviceHeaders(t *testing.T) {
+	insta, _ := newReplay(t)
+	rec := &recorder{}
+	insta.SetHTTPClient(&http.Client{Transport: rec})
+	ctx := t.Context()
+	tz := insta.sess.TimezoneName
+	langs := `{"system_languages":"en-US","keyboard_language":"en-US"}`
+
+	if _, err := insta.Account.ReelSettings(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h := rec.last.Header
+	for k, v := range map[string]string{
+		"X-Bloks-Prism-Extended-Palette-Gray": "true", "X-Bloks-Prism-Extended-Palette-Polish-Enabled": "true",
+		"X-Ig-Device-Languages": langs, "X-Ig-Device-Timezone": tz,
+	} {
+		if h.Get(k) != v || v == "" {
+			t.Errorf("rest %s = %q, want %q", k, h.Get(k), v)
+		}
+	}
+
+	_, _ = insta.graphQL(ctx, "Q", "1", "root", "", nil)
+	if h := rec.last.Header; h.Get("X-Ig-Device-Timezone") != tz || h.Get("X-Ig-Device-Languages") != "" {
+		t.Errorf("graphql timezone %q languages %q", h.Get("X-Ig-Device-Timezone"), h.Get("X-Ig-Device-Languages"))
+	}
+
+	p, err := readPhoto(testJPEG(t, 100, 100))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = insta.uploadPhoto(ctx, p, "feed", "")
+	if h := rec.last.Header; h.Get("X-Ig-Device-Timezone") != "" || h.Get("X-Ig-Device-Languages") != "" {
+		t.Errorf("rupload sent device headers: %v", h)
+	}
+
+	_, _ = insta.call(ctx, &reqOptions{Endpoint: "x/", LoggedOut: true})
+	if h := rec.last.Header; h.Get("X-Ig-Device-Timezone") != "" || h.Get("X-Ig-Device-Languages") != "" {
+		t.Errorf("logged-out request sent device headers: %v", h)
+	}
+}

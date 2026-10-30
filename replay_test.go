@@ -200,6 +200,12 @@ var currentBuildOnly = map[string]bool{
 	"x-fb-appnetsession-nid": true, "x-fb-appnetsession-sid": true, "x-fb-network-properties": true,
 	"x-fb-session-id": true, "x-fb-session-private": true, "x-fb-tasos-td-v2-config": true,
 	"x-meta-tasos-congestion-config": true, "x-meta-tasos-dcc-constraint": true,
+	"x-ig-device-languages": true, "x-ig-device-timezone": true,
+}
+
+// Values the app has sent since the 2026-10-28 captures, where the fixtures have false.
+var currentBuildValues = map[string]string{
+	"x-bloks-prism-extended-palette-gray": "true", "x-bloks-prism-extended-palette-polish-enabled": "true",
 }
 
 // Headers the app sends that are deliberately not replicated.
@@ -250,7 +256,7 @@ func checkRequest(t *testing.T, want httplog.Entry, got sent, extraOK ...string)
 			// The Waydroid window was resized mid-capture; GraphQL picked up the new size.
 			g, v = uaResolution.ReplaceAllString(g, ""), uaResolution.ReplaceAllString(v, "")
 		}
-		if v != "REDACTED" && !volatileHeaders[k] && g != v {
+		if v != "REDACTED" && !volatileHeaders[k] && g != v && currentBuildValues[k] != g {
 			diffH = append(diffH, k+": got "+g+" want "+v)
 		}
 	}

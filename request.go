@@ -57,11 +57,12 @@ var bloksHeaders = []string{
 	"X-Bloks-Prism-Extended-Palette-Gray", "X-Bloks-Prism-Extended-Palette-Indigo",
 	"X-Bloks-Prism-Extended-Palette-Polish-Enabled", "X-Bloks-Prism-Extended-Palette-Red",
 	"X-Bloks-Prism-Extended-Palette-Rest-Of-Colors", "X-Bloks-Prism-Font-Enabled",
-	"X-Bloks-Prism-Indigo-Link-Version",
+	"X-Bloks-Prism-Indigo-Link-Version", "X-Ig-Device-Languages",
 }
 
-var accountHeaders = []string{
+var loggedInHeaders = []string{
 	"Authorization", "Ig-U-Ds-User-Id", "Ig-U-Rur", "Ig-U-Shbid", "Ig-U-Shbts", "Ig-U-Ig-Direct-Region-Hint",
+	"X-Ig-Device-Languages", "X-Ig-Device-Timezone",
 }
 
 const maxBodySize = 64 << 20
@@ -83,17 +84,18 @@ func (o *reqOptions) url() (*url.URL, error) {
 
 func (insta *Instagram) staticHeaders() http.Header {
 	s := insta.sess
+	lang := strings.ReplaceAll(s.Locale, "_", "-")
 	h := http.Header{}
 	for k, v := range map[string]string{
 		"Accept-Encoding":                               "zstd",
-		"Accept-Language":                               strings.ReplaceAll(s.Locale, "_", "-"),
+		"Accept-Language":                               lang,
 		"User-Agent":                                    s.UserAgent,
 		"X-Bloks-Is-Layout-Rtl":                         "false",
 		"X-Bloks-Prism-Button-Version":                  "INDIGO_PRIMARY_BORDERED_SECONDARY",
 		"X-Bloks-Prism-Colors-Enabled":                  "true",
-		"X-Bloks-Prism-Extended-Palette-Gray":           "false",
+		"X-Bloks-Prism-Extended-Palette-Gray":           "true",
 		"X-Bloks-Prism-Extended-Palette-Indigo":         "true",
-		"X-Bloks-Prism-Extended-Palette-Polish-Enabled": "false",
+		"X-Bloks-Prism-Extended-Palette-Polish-Enabled": "true",
 		"X-Bloks-Prism-Extended-Palette-Red":            "true",
 		"X-Bloks-Prism-Extended-Palette-Rest-Of-Colors": "true",
 		"X-Bloks-Prism-Font-Enabled":                    "true",
@@ -112,6 +114,8 @@ func (insta *Instagram) staticHeaders() http.Header {
 		"X-Ig-Client-Endpoint":                          "MainFeedFragment:feed_timeline",
 		"X-Ig-Connection-Type":                          connType,
 		"X-Ig-Device-Id":                                insta.uuid,
+		"X-Ig-Device-Languages":                         `{"system_languages":"` + lang + `","keyboard_language":"` + lang + `"}`,
+		"X-Ig-Device-Timezone":                          s.TimezoneName,
 		"X-Ig-Device-Locale":                            s.Locale,
 		"X-Ig-Family-Device-Id":                         insta.fID,
 		"X-Ig-Is-Adaptive-Ui":                           "true",
@@ -220,7 +224,7 @@ func (insta *Instagram) newRequest(ctx context.Context, o *reqOptions) (*http.Re
 		h.Del(k)
 	}
 	if o.LoggedOut {
-		for _, k := range accountHeaders {
+		for _, k := range loggedInHeaders {
 			h.Del(k)
 		}
 	}
