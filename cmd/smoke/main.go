@@ -58,7 +58,7 @@ func main() {
 	albumSize := flag.Int("album", 2, "photos in the -writes album")
 	keep := flag.Bool("keep", false, "with -crosspost or -highlight, leave what it made up")
 	crosspost := flag.String("crosspost", "", "photo or album: post it shared to Threads and the story with hidden counts, then delete it (the Threads copy stays)")
-	highlight := flag.Bool("highlight", false, "post two stories, make a highlight of one, add the other, then delete the stories")
+	highlight := flag.Bool("highlight", false, "post two stories; create, add to, edit, archive, unarchive and delete a highlight; delete the stories")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -560,38 +560,60 @@ func writeHighlight(r *runner, insta *goinsta.Instagram, keep bool) {
 			if err := hl.AddItems(ctx, stories[1]); err != nil {
 				return "", err
 			}
-			summary := fmt.Sprintf("%s items=%d", hl.ReelID(), len(hl.Items))
-			if len(hl.Items) != 2 {
-				return summary, errors.New("want 2 items: " + summary)
-			}
-			return summary, nil
+			return expect(len(hl.Items) == 2, "%s items=%d", hl.ReelID(), len(hl.Items))
 		})
-		r.step("own Highlights lists it", func() (string, error) {
-			h, err := findHighlight(ctx, insta, hl.ReelID())
-			if err == nil && h == nil {
-				err = errors.New(hl.ReelID() + " not listed")
-			}
+		r.step("reel.Edit (rename, cover, remove)", func() (string, error) {
+			err := hl.Edit(ctx, goinsta.HighlightEdit{Title: "go-insta edit", Cover: stories[1], Remove: stories[:1]})
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("%s media_count=%d", hl.ReelID(), h.MediaCount), nil
+			return expect(hl.Title == "go-insta edit" && len(hl.Items) == 1 && hl.CoverMedia.MediaID == stories[1].ID,
+				"title=%q items=%d cover=%s", hl.Title, len(hl.Items), hl.CoverMedia.MediaID)
+		})
+		r.step("own Highlights lists it", func() (string, error) { return listed(ctx, insta, hl, true) })
+		r.step("reel.Archive", func() (string, error) {
+			if err := hl.Archive(ctx); err != nil {
+				return "", err
+			}
+			return listed(ctx, insta, hl, false)
+		})
+		r.step("reel.Unarchive", func() (string, error) {
+			if err := hl.Unarchive(ctx); err != nil {
+				return "", err
+			}
+			return listed(ctx, insta, hl, true)
 		})
 	}
 	if keep {
 		return
 	}
+	if hl != nil {
+		r.step("reel.Delete (highlight)", func() (string, error) {
+			if err := hl.Delete(ctx); err != nil {
+				return "", err
+			}
+			return listed(ctx, insta, hl, false)
+		})
+	}
 	for _, s := range stories {
 		r.step("item.Delete (highlight story)", func() (string, error) { return s.ID, s.Delete(ctx) })
 	}
-	if hl != nil {
-		r.step("highlight after deleting its stories", func() (string, error) {
-			h, err := findHighlight(ctx, insta, hl.ReelID())
-			if h == nil {
-				return hl.ReelID() + " gone", err
-			}
-			return fmt.Sprintf("%s still listed, media_count=%d", hl.ReelID(), h.MediaCount), err
-		})
+}
+
+func expect(ok bool, format string, args ...any) (string, error) {
+	summary := fmt.Sprintf(format, args...)
+	if !ok {
+		return summary, errors.New("unexpected: " + summary)
 	}
+	return summary, nil
+}
+
+func listed(ctx context.Context, insta *goinsta.Instagram, hl *goinsta.Reel, want bool) (string, error) {
+	h, err := findHighlight(ctx, insta, hl.ReelID())
+	if err != nil {
+		return "", err
+	}
+	return expect((h != nil) == want, "%s listed=%v", hl.ReelID(), h != nil)
 }
 
 func findHighlight(ctx context.Context, insta *goinsta.Instagram, id string) (*goinsta.Reel, error) {
