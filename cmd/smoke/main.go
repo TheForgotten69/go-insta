@@ -56,6 +56,7 @@ func main() {
 	pause := flag.Duration("pause", 2*time.Second, "delay between calls")
 	writes := flag.Bool("writes", false, "also run reversible writes on your own account")
 	albumSize := flag.Int("album", 2, "photos in the -writes album")
+	keep := flag.Bool("keep", false, "with -crosspost, leave the post and its story up")
 	crosspost := flag.String("crosspost", "", "photo or album: post it shared to Threads and the story with hidden counts, then delete it (the Threads copy stays)")
 	flag.Parse()
 
@@ -97,7 +98,7 @@ func main() {
 		writeStory(r, insta)
 	}
 	if *crosspost != "" {
-		writeCrosspost(r, insta, *crosspost)
+		writeCrosspost(r, insta, *crosspost, *keep)
 	}
 
 	if err := insta.ExportSession(*session); err != nil {
@@ -468,7 +469,7 @@ func writeStory(r *runner, insta *goinsta.Instagram) {
 	r.step("item.Delete (story)", func() (string, error) { return story.ID, story.Delete(ctx) })
 }
 
-func writeCrosspost(r *runner, insta *goinsta.Instagram, kind string) {
+func writeCrosspost(r *runner, insta *goinsta.Instagram, kind string, keep bool) {
 	ctx := r.ctx
 	opts := goinsta.PostOptions{
 		Caption:        "go-insta crosspost smoke (" + kind + ")",
@@ -502,7 +503,9 @@ func writeCrosspost(r *runner, insta *goinsta.Instagram, kind string) {
 	if post == nil {
 		return
 	}
-	defer r.step("item.Delete (crosspost)", func() (string, error) { return post.ID, post.Delete(ctx) })
+	if !keep {
+		defer r.step("item.Delete (crosspost)", func() (string, error) { return post.ID, post.Delete(ctx) })
+	}
 
 	r.step("own story reshare", func() (string, error) {
 		reel, err := insta.Account.Stories(ctx)
@@ -516,6 +519,9 @@ func writeCrosspost(r *runner, insta *goinsta.Instagram, kind string) {
 		summary := fmt.Sprintf("%s, %d feed-post stickers", story.ID, len(story.StoryFeedMedia))
 		if len(story.StoryFeedMedia) == 0 {
 			err = errors.New("newest story has no post sticker: " + summary)
+		}
+		if keep {
+			return summary + " (kept)", err
 		}
 		return summary, errors.Join(err, story.Delete(ctx))
 	})
