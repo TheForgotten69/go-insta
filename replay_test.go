@@ -468,18 +468,16 @@ func TestStoriesAndHighlights(t *testing.T) {
 	}
 }
 
+// The 2026-10-31 capture: the first tray page came back empty with a cursor, and
+// paginated_highlights_tray then returned the highlights.
 func TestHighlightsFollowCursor(t *testing.T) {
-	insta, r := newReplay(t, "highlights_tray", "highlights_tray")
-	first := strings.ReplaceAll(r.fixtures[0].RespBody, `"cursor":null`, `"cursor":"C1"`)
-	if first == r.fixtures[0].RespBody {
-		t.Fatal("fixture has no null cursor to replace")
-	}
-	r.fixtures[0].RespBody = first
-	var page struct {
+	insta, r := newReplay(t, "highlights_tray", "highlights_paginated")
+	r.fixtures[0].RespBody = `{"tray":[],"cursor":"C1","status":"ok"}`
+	var last struct {
 		Tray []json.RawMessage `json:"tray"`
 	}
-	if err := json.Unmarshal(lastNDJSONLine([]byte(first)), &page); err != nil || len(page.Tray) == 0 {
-		t.Fatalf("fixture tray: %v", err)
+	if err := json.Unmarshal(lastNDJSONLine([]byte(r.fixtures[1].RespBody)), &last); err != nil || len(last.Tray) == 0 {
+		t.Fatalf("paginated fixture tray: %v", err)
 	}
 	hl, err := insta.NewUser(42865264907).Highlights(t.Context())
 	if err != nil {
@@ -489,14 +487,53 @@ func TestHighlightsFollowCursor(t *testing.T) {
 		t.Fatalf("sent %d requests, want 2", len(r.sent))
 	}
 	checkRequest(t, fixture(t, "highlights_tray"), r.sent[0])
-	if c := r.sent[0].req.URL.Query().Get("cursor"); c != "" {
-		t.Errorf("first page sent cursor %q", c)
-	}
+	checkRequest(t, fixture(t, "highlights_paginated"), r.sent[1])
 	if c := r.sent[1].req.URL.Query().Get("cursor"); c != "C1" {
 		t.Errorf("second page cursor = %q, want C1", c)
 	}
-	if len(hl) != 2*len(page.Tray) || hl[len(hl)-1].insta == nil {
-		t.Errorf("got %d highlights, want %d per page", len(hl), len(page.Tray))
+	if len(hl) != len(last.Tray) || hl[0].insta == nil || hl[0].CoverMedia.MediaID == "" {
+		t.Errorf("got %d highlights, want %d with covers", len(hl), len(last.Tray))
+	}
+}
+
+func TestHighlightEditDeleteArchive(t *testing.T) {
+	insta, r := newReplay(t, "highlight_edit_profile", "highlight_archive", "highlight_unarchive", "highlight_delete")
+	ctx := t.Context()
+	reel := &Reel{insta: insta, ID: json.RawMessage(`"highlight:17967220223979721"`), Title: "b"}
+	reel.CoverMedia.MediaID = "4019480196610911847_42865264907"
+	reel.CoverMedia.CropRect = []float64{0, 0.21822917, 1, 0.78072923}
+	if err := reel.Edit(ctx, HighlightEdit{}); err != nil {
+		t.Fatal(err)
+	}
+	f := fixture(t, "highlight_edit_profile")
+	checkRequest(t, f, r.sent[0])
+	checkSigned(t, f, r.sent[0], "title", "cover", "added_media_ids", "removed_media_ids", "source")
+	if reel.ReelID() != "highlight:17967220223979721" || len(reel.Items) == 0 {
+		t.Errorf("edited reel = %s with %d items", reel.ReelID(), len(reel.Items))
+	}
+
+	other := &Reel{insta: insta, ID: json.RawMessage(`"highlight:18117897188002088"`)}
+	for i, step := range []struct {
+		name string
+		call func(context.Context) error
+	}{
+		{"highlight_archive", other.Archive},
+		{"highlight_unarchive", other.Unarchive},
+		{"highlight_delete", other.Delete},
+	} {
+		if err := step.call(ctx); err != nil {
+			t.Fatalf("%s: %v", step.name, err)
+		}
+		f := fixture(t, step.name)
+		checkRequest(t, f, r.sent[i+1])
+		if step.name != "highlight_delete" && r.sent[i+1].payload["variables"] != f.ReqForm["variables"] {
+			t.Errorf("%s variables = %v, want %v", step.name, r.sent[i+1].payload["variables"], f.ReqForm["variables"])
+		}
+	}
+
+	story := &Reel{insta: insta, ID: json.RawMessage(`"42865264907"`)}
+	if err := story.Delete(ctx); !errors.Is(err, ErrNotHighlight) {
+		t.Errorf("Delete on a story reel = %v, want ErrNotHighlight", err)
 	}
 }
 

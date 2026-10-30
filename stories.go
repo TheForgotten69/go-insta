@@ -1,6 +1,7 @@
 package goinsta
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -76,35 +77,42 @@ type Reel struct {
 	FaceFilterNuxVersion int    `json:"face_filter_nux_version"`
 	HasNewNuxStory       bool   `json:"has_new_nux_story"`
 	User                 User   `json:"user"`
+	// CoverMedia is set on highlights.
+	CoverMedia struct {
+		MediaID  string    `json:"media_id"`
+		CropRect []float64 `json:"crop_rect"`
+	} `json:"cover_media"`
 }
 
 func (user *User) Stories(ctx context.Context) (*Reel, error) {
 	return user.insta.fetchStories(ctx, int64(user.ID))
 }
 
+// maxHighlightPages bounds the cursor walk: the tray can answer an empty page that
+// still carries a cursor, so an empty page does not end it.
+const maxHighlightPages = 100
+
 // Highlights returns every highlight cover, following the tray cursor past the
 // first 10; LoadReels fills their items.
 func (user *User) Highlights(ctx context.Context) ([]*Reel, error) {
 	var reels []*Reel
-	cursor := ""
-	for {
-		q := map[string]string{
-			"check_highlights_subtab_gating":        "false",
-			"fetch_high_res_cover_image":            "true",
-			"max_highlights_to_fetch_on_pagination": "10",
-			"supported_capabilities_new":            supportedCapabilities,
-		}
-		if cursor != "" {
-			q["cursor"] = cursor
-		}
+	endpoint := fmt.Sprintf(urlUserHighlights, user.ID)
+	q := map[string]string{
+		"check_highlights_subtab_gating":        "false",
+		"fetch_high_res_cover_image":            "true",
+		"max_highlights_to_fetch_on_pagination": "10",
+		"supported_capabilities_new":            supportedCapabilities,
+	}
+	cursor, hint := "", "feed"
+	for range maxHighlightPages {
 		var page struct {
 			Reels  []*Reel `json:"tray"`
 			Cursor string  `json:"cursor"`
 		}
 		err := user.insta.callJSON(ctx, &reqOptions{
-			Endpoint:     fmt.Sprintf(urlUserHighlights, user.ID),
+			Endpoint:     endpoint,
 			Stream:       true,
-			ExtraHeaders: map[string]string{"X-Ig-Accept-Hint": "feed"},
+			ExtraHeaders: map[string]string{"X-Ig-Accept-Hint": hint},
 			Query:        q,
 		}, &page)
 		if err != nil {
@@ -118,7 +126,14 @@ func (user *User) Highlights(ctx context.Context) ([]*Reel, error) {
 			return reels, nil
 		}
 		cursor = page.Cursor
+		endpoint, hint = fmt.Sprintf(urlUserHighlightsPage, user.ID), "image-grid"
+		q = map[string]string{
+			"cursor":                                cursor,
+			"max_highlights_to_fetch_on_pagination": "10",
+			"supported_capabilities_new":            supportedCapabilities,
+		}
 	}
+	return nil, fmt.Errorf("highlights: still paging after %d pages", maxHighlightPages)
 }
 
 // CreateHighlight makes a highlight from story items; the first is the cover.
@@ -127,28 +142,57 @@ func (insta *Instagram) CreateHighlight(ctx context.Context, title string, items
 	if len(items) == 0 {
 		return nil, ErrNoHighlightItems
 	}
-	cover, _ := json.Marshal(map[string]string{"media_id": items[0].ID, "crop_rect": coverCrop(items[0])})
-	return insta.postHighlight(ctx, urlHighlightCreate, map[string]string{
+	return insta.postHighlight(ctx, urlHighlightCreate, "STORY_VIEWER_PROFILE", map[string]string{
 		"title":                   title,
-		"cover":                   string(cover),
+		"cover":                   coverJSON(items[0].ID, formatCrop(centredSquare(items[0]))),
 		"media_ids":               mediaIDList(items),
 		"creation_id":             newUploadID(),
 		"should_add_to_main_grid": "false",
 	})
 }
 
-// AddItems adds story items to a highlight and replaces the reel with the server's copy.
+// AddItems adds story items to a highlight, as the story viewer's "Highlight"
+// button does, and replaces the reel with the server's copy.
 func (reel *Reel) AddItems(ctx context.Context, items ...*Item) error {
-	if !strings.HasPrefix(reel.ReelID(), "highlight:") {
-		return ErrNotHighlight
-	}
 	if len(items) == 0 {
 		return ErrNoHighlightItems
 	}
-	got, err := reel.insta.postHighlight(ctx, fmt.Sprintf(urlHighlightEdit, reel.ReelID()), map[string]string{
+	return reel.editHighlight(ctx, "STORY_VIEWER_PROFILE", map[string]string{
 		"added_media_ids":   mediaIDList(items),
 		"removed_media_ids": "[]",
 	})
+}
+
+// HighlightEdit is one save of the profile's "Edit highlight" screen. An empty
+// Title or a nil Cover keeps the current one.
+type HighlightEdit struct {
+	Title       string
+	Cover       *Item
+	Add, Remove []*Item
+}
+
+// Edit applies e and replaces the reel with the server's copy.
+func (reel *Reel) Edit(ctx context.Context, e HighlightEdit) error {
+	payload := map[string]string{
+		"title":             cmp.Or(e.Title, reel.Title),
+		"added_media_ids":   mediaIDList(e.Add),
+		"removed_media_ids": mediaIDList(e.Remove),
+	}
+	media, crop := reel.CoverMedia.MediaID, formatCrop(reel.CoverMedia.CropRect)
+	if e.Cover != nil {
+		media, crop = e.Cover.ID, formatCrop(centredSquare(e.Cover))
+	}
+	if media != "" {
+		payload["cover"] = coverJSON(media, crop)
+	}
+	return reel.editHighlight(ctx, "SELF_PROFILE", payload)
+}
+
+func (reel *Reel) editHighlight(ctx context.Context, source string, payload map[string]string) error {
+	if !reel.isHighlight() {
+		return ErrNotHighlight
+	}
+	got, err := reel.insta.postHighlight(ctx, fmt.Sprintf(urlHighlightEdit, reel.ReelID()), source, payload)
 	if err != nil {
 		return err
 	}
@@ -156,10 +200,73 @@ func (reel *Reel) AddItems(ctx context.Context, items ...*Item) error {
 	return nil
 }
 
-func (insta *Instagram) postHighlight(ctx context.Context, endpoint string, payload map[string]string) (*Reel, error) {
+// Delete removes the highlight; its stories stay in the story archive.
+func (reel *Reel) Delete(ctx context.Context) error {
+	if !reel.isHighlight() {
+		return ErrNotHighlight
+	}
+	q, err := signedBody(map[string]string{
+		"_uid":  strconv.FormatInt(reel.insta.userID(), 10),
+		"_uuid": reel.insta.uuid,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = reel.insta.call(ctx, &reqOptions{
+		Endpoint:      fmt.Sprintf(urlHighlightDelete, reel.ReelID()),
+		IsPost:        true,
+		Query:         q,
+		IgnoreHeaders: []string{"X-Tigon-Is-Retry"}, // absent on delete_reel in the capture
+	})
+	return err
+}
+
+// Archive hides the highlight from the profile; Unarchive shows it again.
+func (reel *Reel) Archive(ctx context.Context) error {
+	return reel.setArchived(ctx, gqlQuery{url: graphQLWWWURL, friendly: "IGProfileArchiveHighlightQuery",
+		docID: docArchiveHighlight, root: "xdt_archive_highlight"})
+}
+
+func (reel *Reel) Unarchive(ctx context.Context) error {
+	return reel.setArchived(ctx, gqlQuery{url: graphQLWWWURL, friendly: "IGProfileUnarchiveHighlightQuery",
+		docID: docUnarchiveHighlight, root: "xdt_unarchive_highlight"})
+}
+
+func (reel *Reel) setArchived(ctx context.Context, gq gqlQuery) error {
+	if !reel.isHighlight() {
+		return ErrNotHighlight
+	}
+	body, err := reel.insta.graphQL(ctx, gq, map[string]any{"highlight_id": reel.ReelID()})
+	if err != nil {
+		return err
+	}
+	var resp struct {
+		Data map[string]*struct {
+			Success      bool   `json:"success"`
+			ErrorMessage string `json:"error_message"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return err
+	}
+	if r := resp.Data[gq.root]; r == nil || !r.Success {
+		msg := "no result"
+		if r != nil {
+			msg = r.ErrorMessage
+		}
+		return fmt.Errorf("%s: %s", gq.root, msg)
+	}
+	return nil
+}
+
+func (reel *Reel) isHighlight() bool {
+	return strings.HasPrefix(reel.ReelID(), "highlight:")
+}
+
+func (insta *Instagram) postHighlight(ctx context.Context, endpoint, source string, payload map[string]string) (*Reel, error) {
 	payload["_uid"] = strconv.FormatInt(insta.userID(), 10)
 	payload["_uuid"] = insta.uuid
-	payload["source"] = "STORY_VIEWER_PROFILE"
+	payload["source"] = source
 	payload["supported_capabilities_new"] = supportedCapabilities
 	q, err := signedBody(payload)
 	if err != nil {
@@ -185,14 +292,29 @@ func mediaIDList(items []*Item) string {
 	return string(b)
 }
 
-// coverCrop is the centred square of the cover as [left,top,right,bottom]
-// fractions, formatted like Java floats ("0.0", "0.21830457").
-func coverCrop(it *Item) string {
+// coverJSON is the cover field: JSON with crop_rect itself a JSON string, keys in the app's order.
+func coverJSON(mediaID, crop string) string {
+	b, _ := json.Marshal(struct {
+		MediaID  string `json:"media_id"`
+		CropRect string `json:"crop_rect"`
+	}{mediaID, crop})
+	return string(b)
+}
+
+// centredSquare is the item's centred square as [left,top,right,bottom] fractions.
+func centredSquare(it *Item) []float64 {
 	w, h := float64(it.OriginalWidth), float64(it.OriginalHeight)
-	r := [4]float64{0, 0, 1, 1}
-	if w > 0 && h > 0 {
-		fx, fy := min(1, h/w), min(1, w/h)
-		r = [4]float64{(1 - fx) / 2, (1 - fy) / 2, (1 + fx) / 2, (1 + fy) / 2}
+	if w <= 0 || h <= 0 {
+		return nil
+	}
+	fx, fy := min(1, h/w), min(1, w/h)
+	return []float64{(1 - fx) / 2, (1 - fy) / 2, (1 + fx) / 2, (1 + fy) / 2}
+}
+
+// formatCrop writes a crop rect like Java floats ("0.0", "0.21830457"); nil is the full frame.
+func formatCrop(r []float64) string {
+	if len(r) != 4 {
+		r = []float64{0, 0, 1, 1}
 	}
 	parts := make([]string, len(r))
 	for i, v := range r {
@@ -336,7 +458,7 @@ func (reel *Reel) MarkSeen(ctx context.Context, items ...*Item) error {
 		reels[it.ID+"_"+reelID] = []string{fmt.Sprintf("%d_%d", it.TakenAt, now)}
 	}
 	module := "reel_feed_timeline"
-	if strings.HasPrefix(reelID, "highlight:") {
+	if reel.isHighlight() {
 		module = "highlight_profile"
 	}
 	q, err := signedBody(map[string]any{
