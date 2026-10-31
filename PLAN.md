@@ -1,6 +1,6 @@
 # go-insta: remaining work
 
-Status (2026-10-31, v0.5.0): password login with TOTP 2FA works live (`go run ./cmd/login`).
+Status (2026-10-31, v0.6.0): password login with TOTP 2FA works live (`go run ./cmd/login`).
 `go run ./cmd/smoke -writes` passes 51/51 live: every public method except Login/Logout (reads,
 follow/unfollow, settings toggle, photo/album/story upload with like, save, pin, note, comments,
 archive, download and delete). `-crosspost photo|album` (Threads cross-post, hidden counts, story
@@ -22,11 +22,14 @@ The `just` recipes below live in `~/Documents/projects/research/instagram/justfi
 
 ## Features
 
-1. **Reels beyond the basic upload**: `UploadReel` works live (2026-10-31, v0.5.0) as one
-   non-segmented `rupload_igvideo` POST and a synchronous `configure_to_clips/?video=1`. Not done:
-   the app's segmented upload (`segment-type`, `upload_settings`), a custom cover image, music,
-   sharing a Reel to the story, and the C2PA `provenance_metadata`. The emulator cannot capture any of
-   it (its H.264 encoder writes nothing under NVIDIA venus); a capture needs real hardware. **[you]**
+1. **Reels**: `UploadReel` + `ReelOptions` (v0.6.0) cover the app's settings; all 200 fields
+   are in `docs/reel-fields.md`. Verified live: audience, comments, downloads, hidden counts,
+   story reshare, scheduling (Delete cancels). Unverified on the personal test account: `Trial`
+   (HTTP 500; needs a professional account), `VoiceTranslation` (accepted, no visible effect),
+   `Captions` (no speech in the test video), `Gifting` (not eligible). Not done: the app's
+   segmented upload (`upload_settings`, `segment-type`; the upload-time `autodub_creation_params`
+   needs it), a custom cover image (`media/configure_to_clips_cover_image/`), music. Testing the
+   unverified options needs a professional account. **[you]**
 2. **Highlight cover from the camera roll** (a dedicated cover image): not captured; the
    captured edits only pick a story frame. **[you]** Instagram cuts titles to 16 characters
    without an error.

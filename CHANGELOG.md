@@ -3,6 +3,25 @@
 All notable changes to this project are documented here. The project uses
 [Semantic Versioning](https://semver.org/) (pre-1.0: a minor bump may break the API).
 
+## [0.6.0] - 2026-10-31
+
+### Features
+
+- **Breaking:** `UploadReel` takes `ReelOptions`, which embeds `PostOptions` and adds
+  every Reel setting decoded from the app: `HideFromFeed`, `DisableComments`,
+  `AllowDownloads`, `DisableTemplate`, `Captions`, `TranslateCaption`, `Gifting`,
+  `Audience` (close friends, followers only, …), `CoverFrameMs`, `Trial`
+  (trial Reels with a graduation strategy), `VoiceTranslation` (AI voice translation),
+  `ScheduledAt`, and `Extra` for any other field.
+- `PostOptions.ShareToStory` on a Reel asks Instagram to reshare it to the story
+  (`ErrReelStoryShare` is gone).
+- `docs/reel-fields.md` lists all 200 fields the app can send when it publishes a
+  Reel, how each is encoded, and which `ReelOptions` field sets it.
+
+### Enhancements
+
+- `UploadReel` waits up to 5 minutes for Instagram's transcode (was 2).
+
 ## [0.5.0] - 2026-10-31
 
 ### Features
@@ -132,6 +151,7 @@ First release: an Instagram for Android 453 private API client.
 - Stories, highlights, likes, comments, saves, follows, photo, album and story uploads.
 - `cmd/httplog` for device captures and `cmd/smoke` for live checks.
 
+[0.6.0]: https://github.com/TheForgotten69/go-insta/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/TheForgotten69/go-insta/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/TheForgotten69/go-insta/compare/v0.3.4...v0.4.0
 [0.3.4]: https://github.com/TheForgotten69/go-insta/compare/v0.3.3...v0.3.4
