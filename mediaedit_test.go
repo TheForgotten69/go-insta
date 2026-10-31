@@ -2,33 +2,13 @@ package goinsta
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"strings"
 	"testing"
 )
 
 func TestMediaManagementRequests(t *testing.T) {
 	insta, _ := newReplay(t)
-	var got struct {
-		method, path string
-		signed       map[string]any
-		form         map[string]string
-	}
-	insta.SetHTTPClient(&http.Client{Transport: handlerFunc(func(req *http.Request) (int, string) {
-		got.method, got.path = req.Method, req.URL.Path
-		got.signed, got.form = nil, map[string]string{}
-		if req.Body != nil {
-			for k, v := range sentForm(t, req) {
-				got.form[k] = v[0]
-			}
-		}
-		if sb, ok := got.form["signed_body"]; ok {
-			_, js, _ := strings.Cut(sb, ".")
-			_ = json.Unmarshal([]byte(js), &got.signed)
-		}
-		return 200, `{"status":"ok","media":{"id":"1_2","caption":{"text":"new"}},"users":[{"pk":7}],"items":[{"id":"1_2","code":"X"}]}`
-	})})
+	calls := capture(t, insta, answer(`{"status":"ok","media":{"id":"1_2","caption":{"text":"new"}},"users":[{"pk":7}],"items":[{"id":"1_2","code":"X"}]}`))
+	last := func() sent { return (*calls)[len(*calls)-1] }
 	item := testItem(insta, "3989118560685351393_62759345752")
 	edited := testItem(insta, "3989118560685351393_62759345752")
 	comment := &Comment{item: item, ID: "17900000000000001"}
@@ -70,16 +50,16 @@ func TestMediaManagementRequests(t *testing.T) {
 			t.Errorf("%s: %v", tc.name, err)
 			continue
 		}
-		if got.method != "POST" || got.path != tc.path {
-			t.Errorf("%s: %s %s, want POST %s", tc.name, got.method, got.path, tc.path)
+		got := last()
+		if got.req.Method != "POST" || got.req.URL.Path != tc.path {
+			t.Errorf("%s: %s %s, want POST %s", tc.name, got.req.Method, got.req.URL.Path, tc.path)
+		}
+		if got.signed == tc.form {
+			t.Errorf("%s: signed body = %v, want %v", tc.name, got.signed, !tc.form)
 		}
 		for k, want := range tc.want {
-			var v any = got.signed[k]
-			if tc.form {
-				v = got.form[k]
-			}
-			if v != want {
-				t.Errorf("%s: %s = %v, want %v", tc.name, k, v, want)
+			if got.payload[k] != want {
+				t.Errorf("%s: %s = %v, want %v", tc.name, k, got.payload[k], want)
 			}
 		}
 	}
@@ -87,10 +67,10 @@ func TestMediaManagementRequests(t *testing.T) {
 	if edited.ID != "1_2" || edited.Caption.Text != "new" {
 		t.Errorf("Edit did not refresh the item: %s %q", edited.ID, edited.Caption.Text)
 	}
-	if likers, err := item.FetchLikers(ctx); err != nil || got.method != "GET" || len(likers) != 1 || likers[0].insta == nil {
-		t.Errorf("FetchLikers: %v %s %d", err, got.method, len(likers))
+	if likers, err := item.FetchLikers(ctx); err != nil || last().req.Method != "GET" || len(likers) != 1 || likers[0].insta == nil {
+		t.Errorf("FetchLikers: %v %s %d", err, last().req.Method, len(likers))
 	}
-	if it, err := insta.MediaInfo(ctx, "1_2"); err != nil || got.path != "/api/v1/media/1_2/info/" || it.Code != "X" {
-		t.Errorf("MediaInfo: %v %s %+v", err, got.path, it)
+	if it, err := insta.MediaInfo(ctx, "1_2"); err != nil || last().req.URL.Path != "/api/v1/media/1_2/info/" || it.Code != "X" {
+		t.Errorf("MediaInfo: %v %s %+v", err, last().req.URL.Path, it)
 	}
 }

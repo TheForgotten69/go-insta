@@ -75,6 +75,12 @@ func truncated(e httplog.Entry) bool {
 type sent struct {
 	req     *http.Request
 	payload map[string]any
+	signed  bool // the body carried a signed_body
+}
+
+func newSent(req *http.Request, raw []byte) sent {
+	form, _ := url.ParseQuery(string(raw))
+	return sent{req: req, payload: payloadOf(req, raw), signed: form.Has("signed_body")}
 }
 
 type replay struct {
@@ -88,18 +94,11 @@ type replay struct {
 func (r *replay) RoundTrip(req *http.Request) (*http.Response, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	var raw []byte
-	if req.Body != nil {
-		raw, _ = io.ReadAll(req.Body)
-		if req.Header.Get("Content-Encoding") == "gzip" {
-			zr, err := gzip.NewReader(bytes.NewReader(raw))
-			if err != nil {
-				return nil, err
-			}
-			raw, _ = io.ReadAll(zr)
-		}
+	raw, err := requestBody(req)
+	if err != nil {
+		return nil, err
 	}
-	r.sent = append(r.sent, sent{req: req, payload: payloadOf(req, raw)})
+	r.sent = append(r.sent, newSent(req, raw))
 
 	idx := -1
 	for i, f := range r.fixtures {
@@ -140,6 +139,49 @@ func samePath(fixture, got string) bool {
 		}
 	}
 	return fixture == got
+}
+
+// requestBody returns the request body, gunzipped when the request is.
+func requestBody(req *http.Request) ([]byte, error) {
+	if req.Body == nil {
+		return nil, nil
+	}
+	raw, err := io.ReadAll(req.Body)
+	if err != nil || req.Header.Get("Content-Encoding") != "gzip" {
+		return raw, err
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	return io.ReadAll(zr)
+}
+
+// capture answers every request with respond and records it, decoded as the replay does.
+func capture(t *testing.T, insta *Instagram, respond func(sent) (int, string)) *[]sent {
+	t.Helper()
+	var all []sent
+	insta.SetHTTPClient(&http.Client{Transport: handlerFunc(func(req *http.Request) (int, string) {
+		raw, err := requestBody(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := newSent(req, raw)
+		all = append(all, s)
+		return respond(s)
+	})})
+	return &all
+}
+
+func answer(body string) func(sent) (int, string) {
+	return func(sent) (int, string) { return 200, body }
+}
+
+// vars decodes the request's GraphQL variables.
+func (s sent) vars() map[string]any {
+	var v map[string]any
+	_ = json.Unmarshal([]byte(fmt.Sprint(s.payload["variables"])), &v)
+	return v
 }
 
 func payloadOf(req *http.Request, raw []byte) map[string]any {
@@ -229,6 +271,11 @@ var currentBuildValues = map[string]string{
 	"priority": "u=1, i", // uploads and configure; the fixtures have u=6, i
 }
 
+// Headers renamed since the 2026-10-27 fixtures, per path: old name -> current name.
+var renamedHeaders = map[string]map[string]string{
+	"/graphql/query": {"x-ig-validate-null-in-legacy-dict": "x-ig-validate-null-in-legacy-eager-dict"},
+}
+
 // Headers the app sends that are deliberately not replicated.
 var skippedHeaders = map[string]bool{
 	"x-ig-app-start-time": true, "x-ig-app-start-request": true, "x-cm-bandwidth-kbps": true,
@@ -271,12 +318,12 @@ var uaDevice = regexp.MustCompile(`Android \(.*; ([a-z]{2}_[A-Z]{2}; \d+)\)`)
 
 func checkRequest(t *testing.T, want httplog.Entry, got sent, extraOK ...string) {
 	t.Helper()
-	if h := want.ReqHeaders; want.Path == "/graphql/query" && h["x-ig-validate-null-in-legacy-dict"] != "" {
-		// The 2026-10-27 build sent the plain dict header to graphql/query; later ones send eager-dict.
-		h = maps.Clone(h)
-		h["x-ig-validate-null-in-legacy-eager-dict"] = h["x-ig-validate-null-in-legacy-dict"]
-		delete(h, "x-ig-validate-null-in-legacy-dict")
-		want.ReqHeaders = h
+	for old, current := range renamedHeaders[want.Path] {
+		if v, ok := want.ReqHeaders[old]; ok {
+			want.ReqHeaders = maps.Clone(want.ReqHeaders)
+			want.ReqHeaders[current] = v
+			delete(want.ReqHeaders, old)
+		}
 	}
 	if got.req.Method != want.Method {
 		t.Errorf("method = %s, want %s", got.req.Method, want.Method)

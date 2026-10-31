@@ -25,7 +25,10 @@ func (f handlerFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func sentForm(t *testing.T, req *http.Request) url.Values {
 	t.Helper()
-	raw, _ := io.ReadAll(req.Body)
+	raw, err := requestBody(req)
+	if err != nil {
+		t.Fatal(err)
+	}
 	v, err := url.ParseQuery(string(raw))
 	if err != nil {
 		t.Fatal(err)
