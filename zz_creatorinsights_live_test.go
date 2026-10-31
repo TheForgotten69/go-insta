@@ -40,8 +40,6 @@ func TestLiveCreatorInsights(t *testing.T) {
 	show("SeriesInsightsAudience", in, err)
 	in, err = insta.Account.FanClubInsights(ctx, fanClub, time.Time{})
 	show("FanClubInsights", in, err)
-	in, err = insta.Account.SubscriptionInsights(ctx)
-	show("SubscriptionInsights", in, err)
-	in, err = insta.EventInsightsNearby(ctx, 48.8566, 2.3522, 24*time.Hour)
-	show("EventInsightsNearby", in, err)
+	sub, err := insta.Account.SubscriptionInsights(ctx)
+	t.Logf("%-28s err=%v %+v", "SubscriptionInsights", err, sub)
 }

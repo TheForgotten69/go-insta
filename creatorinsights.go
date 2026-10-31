@@ -11,11 +11,9 @@ const (
 	docSeriesInsightsEngagement = "281083989014079368110826164376"
 	docSeriesInsightsAudience   = "386340097017018189326628161392"
 	docFanClubInsights          = "147178694610827473488858200058"
-	docEventInsightsUpsampling  = "196534572516133624712880039744"
 
 	rootLinkedMediaPlaylist = "fetch__XIGLinkedMediaPlaylist"
 	rootFanClubInsights     = "node"
-	rootEventInsights       = "xfb_oxsights_event_insights_query_events_for_upsampling"
 
 	urlUserPayInsights = "creators/user_pay/insights/"
 )
@@ -69,21 +67,6 @@ func (account *Account) FanClubInsights(ctx context.Context, fanClubID string, d
 		fanClubInsightsVars{FanClubID: fanClubID, Date: day.Format(time.DateOnly), Count: 50})
 }
 
-type eventInsightsVars struct {
-	StartTime int64   `json:"start_time"`
-	EndTime   int64   `json:"end_time"`
-	Latitude  float64 `json:"latitude"`
-	Longitude float64 `json:"longitude"`
-}
-
-// EventInsightsNearby loads the events around a position that the app collects
-// event insights for, from now to now+window.
-func (insta *Instagram) EventInsightsNearby(ctx context.Context, lat, lng float64, window time.Duration) (*CreatorInsights, error) {
-	now := time.Now().Unix()
-	return insta.creatorInsights(ctx, "EventInsightsUpsamplingQuery", docEventInsightsUpsampling, rootEventInsights,
-		eventInsightsVars{StartTime: now, EndTime: now + int64(window/time.Second), Latitude: lat, Longitude: lng})
-}
-
 func (insta *Instagram) creatorInsights(ctx context.Context, friendly, docID, root string, vars any) (*CreatorInsights, error) {
 	var raw json.RawMessage
 	err := insta.graphQLRoot(ctx, gqlQuery{url: graphQLWWWURL, friendly: friendly, docID: docID, root: root}, vars, &raw)
@@ -93,11 +76,17 @@ func (insta *Instagram) creatorInsights(ctx context.Context, friendly, docID, ro
 	return &CreatorInsights{Raw: raw}, nil
 }
 
-// SubscriptionInsights loads the paid subscriptions (user pay) insights.
-func (account *Account) SubscriptionInsights(ctx context.Context) (*CreatorInsights, error) {
-	var raw json.RawMessage
-	if err := account.insta.callJSON(ctx, &reqOptions{Endpoint: urlUserPayInsights}, &raw); err != nil {
+// SubscriptionInsights is the paid subscriptions (user pay) dashboard.
+type SubscriptionInsights struct {
+	TotalEarned string `json:"formatted_total_amount_earned_by_account"`
+	// Per-media earnings; empty on every account seen so far, so the shape is unknown.
+	MediaInsights []json.RawMessage `json:"media_insights"`
+}
+
+func (account *Account) SubscriptionInsights(ctx context.Context) (*SubscriptionInsights, error) {
+	var in SubscriptionInsights
+	if err := account.insta.callJSON(ctx, &reqOptions{Endpoint: urlUserPayInsights}, &in); err != nil {
 		return nil, err
 	}
-	return &CreatorInsights{Raw: raw}, nil
+	return &in, nil
 }

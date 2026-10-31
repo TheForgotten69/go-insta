@@ -39,11 +39,6 @@ func TestCreatorInsightsRequests(t *testing.T) {
 				return insta.Account.FanClubInsights(ctx, "7", day)
 			},
 			map[string]any{"fan_club_id": "7", "date": "2026-10-31", "count": 50.0}},
-		{"EventInsightsUpsamplingQuery", docEventInsightsUpsampling,
-			func(ctx context.Context) (*CreatorInsights, error) {
-				return insta.EventInsightsNearby(ctx, 48.85, 2.35, time.Hour)
-			},
-			map[string]any{"latitude": 48.85, "longitude": 2.35}},
 	} {
 		in, err := tc.call(ctx)
 		if err != nil || len(in.Raw) == 0 {
@@ -64,14 +59,9 @@ func TestCreatorInsightsRequests(t *testing.T) {
 			}
 		}
 	}
-	ev := (*sent)[len(*sent)-1].vars()
-	if start, end := ev["start_time"].(float64), ev["end_time"].(float64); end-start != 3600 {
-		t.Errorf("event window = %v..%v", start, end)
-	}
-
 	in, err := insta.Account.SubscriptionInsights(ctx)
 	s := (*sent)[len(*sent)-1]
-	if err != nil || s.req.Method != "GET" || s.req.URL.Path != "/api/v1/creators/user_pay/insights/" || string(in.Raw) == "" {
+	if err != nil || s.req.Method != "GET" || s.req.URL.Path != "/api/v1/creators/user_pay/insights/" || in == nil {
 		t.Errorf("SubscriptionInsights: %v %s %s", err, s.req.Method, s.req.URL.Path)
 	}
 }
