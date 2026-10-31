@@ -432,3 +432,15 @@ func (insta *Instagram) isError(code int, body []byte, status, endpoint string) 
 	}
 	return e
 }
+
+// emptyArray, emptyObject and jsonNull marshal to the [], {} and null the app
+// sends for fields it leaves unset.
+type (
+	emptyArray  struct{}
+	emptyObject struct{}
+	jsonNull    struct{}
+)
+
+func (emptyArray) MarshalJSON() ([]byte, error)  { return []byte("[]"), nil }
+func (emptyObject) MarshalJSON() ([]byte, error) { return []byte("{}"), nil }
+func (jsonNull) MarshalJSON() ([]byte, error)    { return []byte("null"), nil }

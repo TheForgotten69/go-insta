@@ -167,10 +167,18 @@ func (insta *Instagram) loggedOutRequest(endpoint, friendly, clientEndpoint stri
 	}
 }
 
+type createKeystoreRequest struct {
+	AppScopedDeviceID string `json:"app_scoped_device_id"`
+	KeyHash           string `json:"key_hash"`
+}
+
 func (insta *Instagram) createKeystore(ctx context.Context, keyHash string) (string, error) {
+	form, err := formOf(createKeystoreRequest{AppScopedDeviceID: insta.uuid, KeyHash: keyHash})
+	if err != nil {
+		return "", err
+	}
 	body, _, err := insta.sendRequest(ctx, insta.loggedOutRequest(createKeystoreURL,
-		"attestation/create_android_keystore/", clientEndpointUnknown,
-		map[string]string{"app_scoped_device_id": insta.uuid, "key_hash": keyHash}))
+		"attestation/create_android_keystore/", clientEndpointUnknown, form))
 	if err != nil {
 		return "", withBody(err, body)
 	}
@@ -186,36 +194,48 @@ func (insta *Instagram) createKeystore(ctx context.Context, keyHash string) (str
 	return r.ChallengeNonce, nil
 }
 
+// processClientDataParams are the params of process_client_data_and_redirect.
+type processClientDataParams struct {
+	IsFromLoggedOut                          bool       `json:"is_from_logged_out"`
+	LoggedOutUser                            string     `json:"logged_out_user"`
+	QPLJoinID                                jsonNull   `json:"qpl_join_id"`
+	FamilyDeviceID                           string     `json:"family_device_id"`
+	DeviceID                                 string     `json:"device_id"`
+	OfflineExperimentGroup                   string     `json:"offline_experiment_group"`
+	WaterfallID                              string     `json:"waterfall_id"`
+	LogoutSource                             string     `json:"logout_source"`
+	ShowInternalSettings                     bool       `json:"show_internal_settings"`
+	LastAutoLoginTime                        int        `json:"last_auto_login_time"`
+	DisableAutoLogin                         bool       `json:"disable_auto_login"`
+	QEDeviceID                               string     `json:"qe_device_id"`
+	UseAutoLoginInterstitial                 bool       `json:"use_auto_login_interstitial"`
+	DisableRecursiveAutoLoginInterstitial    bool       `json:"disable_recursive_auto_login_interstitial"`
+	AutoLoginInterstitialExperimentGroupName string     `json:"auto_login_interstitial_experiment_group_name"`
+	IsFromLoggedInSwitcher                   bool       `json:"is_from_logged_in_switcher"`
+	SwitcherLoggedInUID                      string     `json:"switcher_logged_in_uid"`
+	AccountList                              emptyArray `json:"account_list"`
+	BlockedUID                               emptyArray `json:"blocked_uid"`
+	InternalInfraTheme                       string     `json:"INTERNAL_INFRA_THEME"`
+	LayeredHomepageExperimentGroup           string     `json:"layered_homepage_experiment_group"`
+	LaunchedURL                              string     `json:"launched_url"`
+	SimPhoneNumbers                          emptyArray `json:"sim_phone_numbers"`
+	IsFromRegistrationReminder               bool       `json:"is_from_registration_reminder"`
+}
+
 // fetchAAC renders the logged-out entry point, which mints the account-access
 // context the login request must echo back.
 func (insta *Instagram) fetchAAC(ctx context.Context, waterfallID string) (string, error) {
-	params := map[string]any{
-		"is_from_logged_out":                            false,
-		"logged_out_user":                               "",
-		"qpl_join_id":                                   nil,
-		"family_device_id":                              insta.fID,
-		"device_id":                                     insta.dID,
-		"offline_experiment_group":                      "caa_iteration_v3_perf_ig_4",
-		"waterfall_id":                                  waterfallID,
-		"logout_source":                                 "",
-		"show_internal_settings":                        false,
-		"last_auto_login_time":                          0,
-		"disable_auto_login":                            false,
-		"qe_device_id":                                  insta.uuid,
-		"use_auto_login_interstitial":                   true,
-		"disable_recursive_auto_login_interstitial":     true,
-		"auto_login_interstitial_experiment_group_name": "",
-		"is_from_logged_in_switcher":                    false,
-		"switcher_logged_in_uid":                        "",
-		"account_list":                                  []any{},
-		"blocked_uid":                                   []any{},
-		"INTERNAL_INFRA_THEME":                          "THREE_C",
-		"layered_homepage_experiment_group":             "Deploy: Not in Experiment",
-		"launched_url":                                  "",
-		"sim_phone_numbers":                             []any{},
-		"is_from_registration_reminder":                 false,
-	}
-	form, err := insta.bloksForm(params)
+	form, err := insta.bloksForm(processClientDataParams{
+		FamilyDeviceID:                        insta.fID,
+		DeviceID:                              insta.dID,
+		OfflineExperimentGroup:                "caa_iteration_v3_perf_ig_4",
+		WaterfallID:                           waterfallID,
+		QEDeviceID:                            insta.uuid,
+		UseAutoLoginInterstitial:              true,
+		DisableRecursiveAutoLoginInterstitial: true,
+		InternalInfraTheme:                    "THREE_C",
+		LayeredHomepageExperimentGroup:        "Deploy: Not in Experiment",
+	})
 	if err != nil {
 		return "", err
 	}
@@ -240,41 +260,63 @@ func extractAAC(body []byte) (string, error) {
 	return string(m[1]), nil
 }
 
+// bloksParams is the params document of a Bloks async action.
+type bloksParams[C, S any] struct {
+	Client C `json:"client_input_params"`
+	Server S `json:"server_params"`
+}
+
+type bloksAsyncForm struct {
+	Params            string `json:"params"`
+	ClientContext     string `json:"bk_client_context"`
+	BloksVersioningID string `json:"bloks_versioning_id"`
+}
+
+type bloksClientContext struct {
+	BloksVersion string       `json:"bloks_version"`
+	StylesID     string       `json:"styles_id"`
+	ThemeParams  []bloksTheme `json:"theme_params"`
+}
+
+type bloksTheme struct {
+	Value            []string `json:"value"`
+	DesignSystemName string   `json:"design_system_name"`
+}
+
 // bloksForm wraps params in the async_action form the app posts.
-func (insta *Instagram) bloksForm(params map[string]any) (map[string]string, error) {
+func (insta *Instagram) bloksForm(params any) (map[string]string, error) {
 	p, err := json.Marshal(params)
 	if err != nil {
 		return nil, err
 	}
-	bk, err := json.Marshal(map[string]any{
-		"bloks_version": insta.sess.BloksVersionID,
-		"styles_id":     "instagram",
-		"theme_params": []any{map[string]any{
-			"value": []string{"three_neutral_gray"}, "design_system_name": "XMDS",
-		}},
+	bk, err := json.Marshal(bloksClientContext{
+		BloksVersion: insta.sess.BloksVersionID,
+		StylesID:     "instagram",
+		ThemeParams:  []bloksTheme{{Value: []string{"three_neutral_gray"}, DesignSystemName: "XMDS"}},
 	})
 	if err != nil {
 		return nil, err
 	}
-	return map[string]string{
-		"params":              string(p),
-		"bk_client_context":   string(bk),
-		"bloks_versioning_id": insta.sess.BloksVersionID,
-	}, nil
+	return formOf(bloksAsyncForm{Params: string(p), ClientContext: string(bk), BloksVersioningID: insta.sess.BloksVersionID})
+}
+
+type attestationParams struct {
+	Attestation []attestationEntry `json:"attestation"`
+}
+
+type attestationEntry struct {
+	Version        int    `json:"version"`
+	Type           string `json:"type"`
+	Errors         []int  `json:"errors"`
+	ChallengeNonce string `json:"challenge_nonce"`
+	SignedNonce    string `json:"signed_nonce"`
+	KeyHash        string `json:"key_hash"`
 }
 
 // attestParams reports that the device could not produce a keystore attestation
 // (-1013, as on Waydroid) for the server's challenge.
 func attestParams(challengeNonce string) (string, error) {
-	type entry struct {
-		Version        int    `json:"version"`
-		Type           string `json:"type"`
-		Errors         []int  `json:"errors"`
-		ChallengeNonce string `json:"challenge_nonce"`
-		SignedNonce    string `json:"signed_nonce"`
-		KeyHash        string `json:"key_hash"`
-	}
-	b, err := json.Marshal(map[string][]entry{"attestation": {{
+	b, err := json.Marshal(attestationParams{Attestation: []attestationEntry{{
 		Version: 2, Type: "keystore", Errors: []int{-1013}, ChallengeNonce: challengeNonce,
 	}}})
 	return string(b), err
@@ -476,23 +518,24 @@ func (insta *Instagram) LoginTwoFactor(ctx context.Context, code string) (err er
 	if code == "" {
 		return errors.New("empty two-factor code")
 	}
-	if _, err := insta.twoStepAction(ctx, methodPickerURL, clientEndpointMethodPicker, tfa.context,
-		map[string]any{"selected_method": "totp"},
-		map[string]any{"should_fallback_to_sms": 0},
+	if _, err := insta.twoStepAction(ctx, methodPickerURL, clientEndpointMethodPicker,
+		bloksParams[methodPickerClient, methodPickerServer]{
+			Client: methodPickerClient{SelectedMethod: "totp"},
+			Server: methodPickerServer{twoStepServerParams: insta.twoStepServer(tfa.context)},
+		},
 	); err != nil {
 		return fmt.Errorf("method_picker: %w", err)
 	}
-	body, err := insta.twoStepAction(ctx, verifyCodeURL, clientEndpointTOTP, tfa.context,
-		map[string]any{
-			"code":                   code,
-			"auth_secure_device_id":  "",
-			"block_store_machine_id": "",
-			"should_trust_device":    0,
-			"device_id":              insta.dID,
-			"family_device_id":       insta.fID,
-			"machine_id":             insta.machineID(),
+	body, err := insta.twoStepAction(ctx, verifyCodeURL, clientEndpointTOTP,
+		bloksParams[verifyCodeClient, verifyCodeServer]{
+			Client: verifyCodeClient{
+				Code:           code,
+				DeviceID:       insta.dID,
+				FamilyDeviceID: insta.fID,
+				MachineID:      insta.machineID(),
+			},
+			Server: verifyCodeServer{twoStepServerParams: insta.twoStepServer(tfa.context), Challenge: "totp"},
 		},
-		map[string]any{"challenge": "totp"},
 	)
 	if err != nil {
 		return fmt.Errorf("verify_code: %w", err)
@@ -510,18 +553,61 @@ func (insta *Instagram) machineID() string {
 	return insta.sess.Mid
 }
 
-// twoStepAction posts a two_step_verification async action, adding the fields
-// every step sends to the step-specific client and server params.
-func (insta *Instagram) twoStepAction(ctx context.Context, url, endpoint, context2fa string, client, server map[string]any) ([]byte, error) {
-	client["cloud_trust_token"] = nil
-	client["network_bssid"] = nil
-	server["INTERNAL__latency_qpl_marker_id"] = 36707139
-	server["INTERNAL__latency_qpl_instance_id"] = insta.qplInstance()
-	server["device_id"] = insta.dID
-	server["spectra_reg_login_data"] = nil
-	server["two_step_verification_context"] = context2fa
-	server["flow_source"] = "two_factor_login"
-	form, err := insta.bloksForm(map[string]any{"client_input_params": client, "server_params": server})
+// twoStepClientParams are the client fields every two-step action sends.
+type twoStepClientParams struct {
+	CloudTrustToken jsonNull `json:"cloud_trust_token"`
+	NetworkBSSID    jsonNull `json:"network_bssid"`
+}
+
+type methodPickerClient struct {
+	twoStepClientParams
+	SelectedMethod string `json:"selected_method"`
+}
+
+type verifyCodeClient struct {
+	twoStepClientParams
+	Code                string `json:"code"`
+	AuthSecureDeviceID  string `json:"auth_secure_device_id"`
+	BlockStoreMachineID string `json:"block_store_machine_id"`
+	ShouldTrustDevice   int    `json:"should_trust_device"`
+	DeviceID            string `json:"device_id"`
+	FamilyDeviceID      string `json:"family_device_id"`
+	MachineID           string `json:"machine_id"`
+}
+
+// twoStepServerParams are the server fields every two-step action sends.
+type twoStepServerParams struct {
+	LatencyQPLMarkerID         int      `json:"INTERNAL__latency_qpl_marker_id"`
+	LatencyQPLInstanceID       int64    `json:"INTERNAL__latency_qpl_instance_id"`
+	DeviceID                   string   `json:"device_id"`
+	SpectraRegLoginData        jsonNull `json:"spectra_reg_login_data"`
+	TwoStepVerificationContext string   `json:"two_step_verification_context"`
+	FlowSource                 string   `json:"flow_source"`
+}
+
+type methodPickerServer struct {
+	twoStepServerParams
+	ShouldFallbackToSMS int `json:"should_fallback_to_sms"`
+}
+
+type verifyCodeServer struct {
+	twoStepServerParams
+	Challenge string `json:"challenge"`
+}
+
+func (insta *Instagram) twoStepServer(context2fa string) twoStepServerParams {
+	return twoStepServerParams{
+		LatencyQPLMarkerID:         36707139,
+		LatencyQPLInstanceID:       insta.qplInstance(),
+		DeviceID:                   insta.dID,
+		TwoStepVerificationContext: context2fa,
+		FlowSource:                 "two_factor_login",
+	}
+}
+
+// twoStepAction posts a two_step_verification async action.
+func (insta *Instagram) twoStepAction(ctx context.Context, url, endpoint string, params any) ([]byte, error) {
+	form, err := insta.bloksForm(params)
 	if err != nil {
 		return nil, err
 	}
@@ -544,104 +630,169 @@ func actionName(url string) string {
 
 // loginParams builds the send_login_request body. Many fields are static context
 // the app sends; the ones that matter are the credential, contact point and device.
-func (insta *Instagram) loginParams(username, encPassword string, flow *loginFlow) map[string]any {
-	return map[string]any{
-		"client_input_params": map[string]any{
-			"password":                                encPassword,
-			"contact_point":                           username,
-			"device_id":                               insta.dID,
-			"family_device_id":                        insta.fID,
-			"machine_id":                              insta.sess.Mid,
-			"aac":                                     flow.aac,
-			"login_attempt_count":                     1,
-			"try_num":                                 1,
-			"event_flow":                              "login_manual",
-			"event_step":                              "home_page",
-			"password_contains_non_ascii":             "false",
-			"si_device_param_network_info":            networkInfo(),
-			"flash_call_permission_status":            map[string]any{"READ_PHONE_STATE": "DENIED", "READ_CALL_LOG": "DENIED", "ANSWER_PHONE_CALLS": "DENIED"},
-			"lois_settings":                           map[string]any{"lois_token": ""},
-			"openid_tokens":                           map[string]any{},
-			"accounts_list":                           []any{},
-			"aymh_accounts":                           []any{},
-			"blocked_uids":                            []any{},
-			"sim_phones":                              []any{},
-			"sso_accounts_auth_data":                  []any{},
-			"device_emails":                           []any{},
-			"fb_ig_device_id":                         []any{},
-			"network_bssid":                           nil,
-			"ig_vetted_device_nonces":                 nil,
-			"cloud_trust_token":                       nil,
-			"sso_token_map_json_string":               "",
-			"client_known_key_hash":                   "",
-			"secure_family_device_id":                 "",
-			"auth_secure_device_id":                   "",
-			"block_store_machine_id":                  "",
-			"encrypted_msisdn":                        "",
-			"app_manager_id":                          "",
-			"headers_infra_flow_id":                   "",
-			"zero_balance_state":                      "",
-			"has_whatsapp_installed":                  0,
-			"has_granted_read_contacts_permissions":   0,
-			"has_granted_read_phone_permissions":      0,
-			"should_show_nested_nta_from_aymh":        0,
-			"gms_incoming_call_retriever_eligibility": "not_eligible",
+func (insta *Instagram) loginParams(username, encPassword string, flow *loginFlow) bloksParams[loginClientParams, loginServerParams] {
+	return bloksParams[loginClientParams, loginServerParams]{
+		Client: loginClientParams{
+			Password:                            encPassword,
+			ContactPoint:                        username,
+			DeviceID:                            insta.dID,
+			FamilyDeviceID:                      insta.fID,
+			MachineID:                           insta.sess.Mid,
+			AAC:                                 flow.aac,
+			LoginAttemptCount:                   1,
+			TryNum:                              1,
+			EventFlow:                           "login_manual",
+			EventStep:                           "home_page",
+			PasswordContainsNonASCII:            "false",
+			FlashCallPermissionStatus:           flashCallPermissions{ReadPhoneState: "DENIED", ReadCallLog: "DENIED", AnswerPhoneCalls: "DENIED"},
+			GMSIncomingCallRetrieverEligibility: "not_eligible",
 		},
-		"server_params": map[string]any{
-			"credential_type":                              "password",
-			"device_id":                                    insta.dID,
-			"family_device_id":                             insta.fID,
-			"qe_device_id":                                 insta.uuid,
-			"waterfall_id":                                 flow.waterfallID,
-			"server_login_source":                          "login",
-			"login_source":                                 "Login",
-			"login_surface":                                "login_home",
-			"login_entry_point":                            "logged_out",
-			"login_credential_type":                        "none",
-			"two_step_login_type":                          "one_step_login",
-			"access_flow_version":                          "pre_mt_behavior",
-			"ar_event_source":                              "login_home_page",
-			"reg_flow_source":                              "login_home_native_integration_point",
-			"left_nav_button_action":                       "NONE",
-			"layered_homepage_experiment_group":            "Deploy: Not in Experiment",
-			"offline_experiment_group":                     "caa_iteration_v3_perf_ig_4",
-			"caller":                                       "gslr",
-			"INTERNAL__latency_qpl_marker_id":              36707139,
-			"INTERNAL__latency_qpl_instance_id":            insta.qplInstance(),
-			"username_text_input_id":                       flow.inputPrefix + ":123",
-			"password_text_input_id":                       flow.inputPrefix + ":124",
-			"is_caa_perf_enabled":                          1,
-			"is_from_logged_out":                           0,
-			"is_platform_login":                            0,
-			"is_from_logged_in_switcher":                   0,
-			"is_from_aymh":                                 0,
-			"is_from_landing_page":                         0,
-			"is_from_empty_password":                       0,
-			"is_from_msplit_fallback":                      0,
-			"is_from_password_entry_page":                  0,
-			"is_from_assistive_id":                         0,
-			"should_trigger_override_login_2fa_action":     0,
-			"should_trigger_override_login_success_action": 0,
+		Server: loginServerParams{
+			CredentialType:                 "password",
+			DeviceID:                       insta.dID,
+			FamilyDeviceID:                 insta.fID,
+			QEDeviceID:                     insta.uuid,
+			WaterfallID:                    flow.waterfallID,
+			ServerLoginSource:              "login",
+			LoginSource:                    "Login",
+			LoginSurface:                   "login_home",
+			LoginEntryPoint:                "logged_out",
+			LoginCredentialType:            "none",
+			TwoStepLoginType:               "one_step_login",
+			AccessFlowVersion:              "pre_mt_behavior",
+			AREventSource:                  "login_home_page",
+			RegFlowSource:                  "login_home_native_integration_point",
+			LeftNavButtonAction:            "NONE",
+			LayeredHomepageExperimentGroup: "Deploy: Not in Experiment",
+			OfflineExperimentGroup:         "caa_iteration_v3_perf_ig_4",
+			Caller:                         "gslr",
+			LatencyQPLMarkerID:             36707139,
+			LatencyQPLInstanceID:           insta.qplInstance(),
+			UsernameTextInputID:            flow.inputPrefix + ":123",
+			PasswordTextInputID:            flow.inputPrefix + ":124",
+			IsCAAPerfEnabled:               1,
 		},
 	}
 }
 
-// networkInfo mirrors the static si_device_param_network_info block the app sends.
-func networkInfo() map[string]any {
-	sub := map[string]any{"is_mobile_data_enabled": 0}
-	for _, k := range []string{
-		"network_type", "is_data_roaming", "is_esim", "is_gsm_roaming", "is_sim_sms_capable",
-		"sim_carrier_id", "sim_carrier_id_name", "sim_state", "sim_operator", "sim_operator_name",
-		"signal_strength", "group_id_level_1", "network_operator",
-	} {
-		sub[k] = nil
-	}
-	return map[string]any{
-		"active_subscriptions_info": nil, "default_subscription_info": sub,
-		"active_data_subscription_info": nil, "default_sms_subscription_info": nil,
-		"is_airplane_mode": 0, "is_active_network_cellular": 0, "is_device_sms_capable": 0,
-		"sim_count": 0, "is_wifi": 0,
-	}
+type loginClientParams struct {
+	Password                            string               `json:"password"`
+	ContactPoint                        string               `json:"contact_point"`
+	DeviceID                            string               `json:"device_id"`
+	FamilyDeviceID                      string               `json:"family_device_id"`
+	MachineID                           string               `json:"machine_id"`
+	AAC                                 string               `json:"aac"`
+	LoginAttemptCount                   int                  `json:"login_attempt_count"`
+	TryNum                              int                  `json:"try_num"`
+	EventFlow                           string               `json:"event_flow"`
+	EventStep                           string               `json:"event_step"`
+	PasswordContainsNonASCII            string               `json:"password_contains_non_ascii"`
+	SIDeviceParamNetworkInfo            networkInfo          `json:"si_device_param_network_info"`
+	FlashCallPermissionStatus           flashCallPermissions `json:"flash_call_permission_status"`
+	LoisSettings                        loisSettings         `json:"lois_settings"`
+	OpenIDTokens                        emptyObject          `json:"openid_tokens"`
+	AccountsList                        emptyArray           `json:"accounts_list"`
+	AYMHAccounts                        emptyArray           `json:"aymh_accounts"`
+	BlockedUIDs                         emptyArray           `json:"blocked_uids"`
+	SimPhones                           emptyArray           `json:"sim_phones"`
+	SSOAccountsAuthData                 emptyArray           `json:"sso_accounts_auth_data"`
+	DeviceEmails                        emptyArray           `json:"device_emails"`
+	FBIGDeviceID                        emptyArray           `json:"fb_ig_device_id"`
+	NetworkBSSID                        jsonNull             `json:"network_bssid"`
+	IGVettedDeviceNonces                jsonNull             `json:"ig_vetted_device_nonces"`
+	CloudTrustToken                     jsonNull             `json:"cloud_trust_token"`
+	SSOTokenMapJSONString               string               `json:"sso_token_map_json_string"`
+	ClientKnownKeyHash                  string               `json:"client_known_key_hash"`
+	SecureFamilyDeviceID                string               `json:"secure_family_device_id"`
+	AuthSecureDeviceID                  string               `json:"auth_secure_device_id"`
+	BlockStoreMachineID                 string               `json:"block_store_machine_id"`
+	EncryptedMSISDN                     string               `json:"encrypted_msisdn"`
+	AppManagerID                        string               `json:"app_manager_id"`
+	HeadersInfraFlowID                  string               `json:"headers_infra_flow_id"`
+	ZeroBalanceState                    string               `json:"zero_balance_state"`
+	HasWhatsappInstalled                int                  `json:"has_whatsapp_installed"`
+	HasGrantedReadContactsPermissions   int                  `json:"has_granted_read_contacts_permissions"`
+	HasGrantedReadPhonePermissions      int                  `json:"has_granted_read_phone_permissions"`
+	ShouldShowNestedNTAFromAYMH         int                  `json:"should_show_nested_nta_from_aymh"`
+	GMSIncomingCallRetrieverEligibility string               `json:"gms_incoming_call_retriever_eligibility"`
+}
+
+type flashCallPermissions struct {
+	ReadPhoneState   string `json:"READ_PHONE_STATE"`
+	ReadCallLog      string `json:"READ_CALL_LOG"`
+	AnswerPhoneCalls string `json:"ANSWER_PHONE_CALLS"`
+}
+
+type loisSettings struct {
+	LoisToken string `json:"lois_token"`
+}
+
+type loginServerParams struct {
+	CredentialType                          string `json:"credential_type"`
+	DeviceID                                string `json:"device_id"`
+	FamilyDeviceID                          string `json:"family_device_id"`
+	QEDeviceID                              string `json:"qe_device_id"`
+	WaterfallID                             string `json:"waterfall_id"`
+	ServerLoginSource                       string `json:"server_login_source"`
+	LoginSource                             string `json:"login_source"`
+	LoginSurface                            string `json:"login_surface"`
+	LoginEntryPoint                         string `json:"login_entry_point"`
+	LoginCredentialType                     string `json:"login_credential_type"`
+	TwoStepLoginType                        string `json:"two_step_login_type"`
+	AccessFlowVersion                       string `json:"access_flow_version"`
+	AREventSource                           string `json:"ar_event_source"`
+	RegFlowSource                           string `json:"reg_flow_source"`
+	LeftNavButtonAction                     string `json:"left_nav_button_action"`
+	LayeredHomepageExperimentGroup          string `json:"layered_homepage_experiment_group"`
+	OfflineExperimentGroup                  string `json:"offline_experiment_group"`
+	Caller                                  string `json:"caller"`
+	LatencyQPLMarkerID                      int    `json:"INTERNAL__latency_qpl_marker_id"`
+	LatencyQPLInstanceID                    int64  `json:"INTERNAL__latency_qpl_instance_id"`
+	UsernameTextInputID                     string `json:"username_text_input_id"`
+	PasswordTextInputID                     string `json:"password_text_input_id"`
+	IsCAAPerfEnabled                        int    `json:"is_caa_perf_enabled"`
+	IsFromLoggedOut                         int    `json:"is_from_logged_out"`
+	IsPlatformLogin                         int    `json:"is_platform_login"`
+	IsFromLoggedInSwitcher                  int    `json:"is_from_logged_in_switcher"`
+	IsFromAYMH                              int    `json:"is_from_aymh"`
+	IsFromLandingPage                       int    `json:"is_from_landing_page"`
+	IsFromEmptyPassword                     int    `json:"is_from_empty_password"`
+	IsFromMsplitFallback                    int    `json:"is_from_msplit_fallback"`
+	IsFromPasswordEntryPage                 int    `json:"is_from_password_entry_page"`
+	IsFromAssistiveID                       int    `json:"is_from_assistive_id"`
+	ShouldTriggerOverrideLogin2FAAction     int    `json:"should_trigger_override_login_2fa_action"`
+	ShouldTriggerOverrideLoginSuccessAction int    `json:"should_trigger_override_login_success_action"`
+}
+
+// networkInfo is the static si_device_param_network_info block the app sends;
+// its zero value is that block.
+type networkInfo struct {
+	ActiveSubscriptionsInfo    jsonNull         `json:"active_subscriptions_info"`
+	DefaultSubscriptionInfo    subscriptionInfo `json:"default_subscription_info"`
+	ActiveDataSubscriptionInfo jsonNull         `json:"active_data_subscription_info"`
+	DefaultSMSSubscriptionInfo jsonNull         `json:"default_sms_subscription_info"`
+	IsAirplaneMode             int              `json:"is_airplane_mode"`
+	IsActiveNetworkCellular    int              `json:"is_active_network_cellular"`
+	IsDeviceSMSCapable         int              `json:"is_device_sms_capable"`
+	SimCount                   int              `json:"sim_count"`
+	IsWifi                     int              `json:"is_wifi"`
+}
+
+type subscriptionInfo struct {
+	IsMobileDataEnabled int      `json:"is_mobile_data_enabled"`
+	NetworkType         jsonNull `json:"network_type"`
+	IsDataRoaming       jsonNull `json:"is_data_roaming"`
+	IsESIM              jsonNull `json:"is_esim"`
+	IsGSMRoaming        jsonNull `json:"is_gsm_roaming"`
+	IsSimSMSCapable     jsonNull `json:"is_sim_sms_capable"`
+	SimCarrierID        jsonNull `json:"sim_carrier_id"`
+	SimCarrierIDName    jsonNull `json:"sim_carrier_id_name"`
+	SimState            jsonNull `json:"sim_state"`
+	SimOperator         jsonNull `json:"sim_operator"`
+	SimOperatorName     jsonNull `json:"sim_operator_name"`
+	SignalStrength      jsonNull `json:"signal_strength"`
+	GroupIDLevel1       jsonNull `json:"group_id_level_1"`
+	NetworkOperator     jsonNull `json:"network_operator"`
 }
 
 func snippet(b []byte) string {

@@ -217,24 +217,35 @@ type LogoutResult struct {
 	Status                   string `json:"status"`
 }
 
+type logoutRequest struct {
+	UUID                      string `json:"_uuid"`
+	CloudAccountID            string `json:"cloud_account_id"`
+	DeviceID                  string `json:"device_id"`
+	GUID                      string `json:"guid"`
+	IsAppLevelSPI             string `json:"is_app_level_spi"`
+	OneTapAppLogin            string `json:"one_tap_app_login"`
+	PhoneID                   string `json:"phone_id"`
+	PreventRemoveDeviceFromWA string `json:"prevent_remove_device_from_wa"`
+}
+
 // Logout ends the session server-side. The session's token is invalid afterward;
 // the returned nonce allows a later one-tap re-login from the same device.
 func (insta *Instagram) Logout(ctx context.Context) (*LogoutResult, error) {
+	q, err := formOf(logoutRequest{
+		UUID:                      insta.uuid,
+		CloudAccountID:            insta.uuid,
+		DeviceID:                  insta.dID,
+		GUID:                      insta.uuid,
+		IsAppLevelSPI:             "true",
+		OneTapAppLogin:            "true",
+		PhoneID:                   insta.fID,
+		PreventRemoveDeviceFromWA: "true",
+	})
+	if err != nil {
+		return nil, err
+	}
 	var r LogoutResult
-	err := insta.callJSON(ctx, &reqOptions{
-		Endpoint: urlLogout,
-		IsPost:   true,
-		Query: map[string]string{
-			"_uuid":                         insta.uuid,
-			"cloud_account_id":              insta.uuid,
-			"device_id":                     insta.dID,
-			"guid":                          insta.uuid,
-			"is_app_level_spi":              "true",
-			"one_tap_app_login":             "true",
-			"phone_id":                      insta.fID,
-			"prevent_remove_device_from_wa": "true",
-		},
-	}, &r)
+	err = insta.callJSON(ctx, &reqOptions{Endpoint: urlLogout, IsPost: true, Query: q}, &r)
 	if err != nil {
 		return nil, err
 	}
