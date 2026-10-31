@@ -288,11 +288,15 @@ func (reel *Reel) Unarchive(ctx context.Context) error {
 		docID: docUnarchiveHighlight, root: "xdt_unarchive_highlight"})
 }
 
+type highlightIDVars struct {
+	HighlightID string `json:"highlight_id"`
+}
+
 func (reel *Reel) setArchived(ctx context.Context, gq gqlQuery) error {
 	if !reel.isHighlight() {
 		return ErrNotHighlight
 	}
-	body, err := reel.insta.graphQL(ctx, gq, map[string]any{"highlight_id": reel.ReelID()})
+	body, err := reel.insta.graphQL(ctx, gq, highlightIDVars{HighlightID: reel.ReelID()})
 	if err != nil {
 		return err
 	}
@@ -515,8 +519,6 @@ func (reel *Reel) Sync(ctx context.Context) error {
 	*reel = *r
 	return nil
 }
-
-type emptyObject struct{}
 
 type mediaSeenRequest struct {
 	sessionIDs
