@@ -66,12 +66,16 @@ func (item *Item) Edit(ctx context.Context, e MediaEdit) error {
 }
 
 func (item *Item) DisableComments(ctx context.Context) error {
-	_, err := item.insta.call(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlDisableComments, item.ID), IsPost: true, Signed: item.insta.sessionIDs()})
-	return err
+	return item.postAction(ctx, urlDisableComments, item.insta.sessionIDs())
 }
 
 func (item *Item) EnableComments(ctx context.Context) error {
-	_, err := item.insta.call(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlEnableComments, item.ID), IsPost: true, Signed: item.insta.sessionIDs()})
+	return item.postAction(ctx, urlEnableComments, item.insta.sessionIDs())
+}
+
+// postAction signs body to one of the media/{id}/<action>/ endpoints.
+func (item *Item) postAction(ctx context.Context, endpoint string, body any) error {
+	_, err := item.insta.call(ctx, &reqOptions{Endpoint: fmt.Sprintf(endpoint, item.ID), IsPost: true, Signed: body})
 	return err
 }
 
@@ -134,8 +138,7 @@ func (item *Item) SetRemixAllowed(ctx context.Context, allowed bool) error {
 
 // Unarchive shows an archived post on the profile again (undoes Archive).
 func (item *Item) Unarchive(ctx context.Context) error {
-	_, err := item.insta.call(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlUndoOnlyMe, item.ID), IsPost: true, Signed: mediaIDRequest{item.insta.sessionIDs(), item.ID}})
-	return err
+	return item.postAction(ctx, urlUndoOnlyMe, mediaIDRequest{item.insta.sessionIDs(), item.ID})
 }
 
 // Pin pins the comment to the top of its post; Unpin undoes it.
@@ -163,10 +166,7 @@ func (item *Item) FetchLikers(ctx context.Context) ([]*User, error) {
 	if err := item.insta.callJSON(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlMediaLikers, item.ID)}, &resp); err != nil {
 		return nil, err
 	}
-	for _, u := range resp.Users {
-		u.insta = item.insta
-	}
-	return resp.Users, nil
+	return item.insta.usersFrom(resp.Users, entryContext{}), nil
 }
 
 // MediaInfo loads one post, Reel or story item by id ("<pk>_<owner id>" or pk).
