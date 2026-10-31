@@ -9,6 +9,11 @@ All notable changes to this project are documented here. The project uses
 
 - `StoryOptions.LinkPost` also links Reels (verified live).
 
+### Documentation
+
+- `StoryOptions.LinkPost` draws nothing: the story shows the uploaded image as is,
+  and only the centered tap area opens the post.
+
 ## [0.7.1] - 2026-10-31
 
 ### Breaking

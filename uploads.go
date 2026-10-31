@@ -528,8 +528,10 @@ func (j jsonText[T]) MarshalJSON() ([]byte, error) {
 }
 
 type StoryOptions struct {
-	// LinkPost is opened by tapping the story. Instagram caps the tap area
-	// at the centered half of the frame in each direction.
+	// LinkPost is a post or Reel opened by tapping the story. The link draws
+	// nothing: the story shows the image as uploaded, so put any preview of
+	// the post in the image. Instagram caps the tap area at the centered half
+	// of the frame in each direction.
 	LinkPost *Item
 }
 
