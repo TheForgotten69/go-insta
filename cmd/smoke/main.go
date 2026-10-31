@@ -136,6 +136,16 @@ func readAccountExtras(r *runner, insta *goinsta.Instagram) {
 		p, err := acc.PendingFollowRequests(ctx)
 		return fmt.Sprintf("%d pending", len(p)), err
 	})
+	r.step("Inbox + PendingInbox", func() (string, error) {
+		in, pending := insta.Inbox(), insta.PendingInbox()
+		if err := in.Next(ctx); err != nil {
+			return "", err
+		}
+		if err := pending.Next(ctx); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d threads, %d pending", len(in.Items), len(pending.Items)), nil
+	})
 	r.step("user.TaggedPosts (own)", func() (string, error) {
 		tp := acc.User().TaggedPosts()
 		return fmt.Sprintf("%d tagged", len(tp.Items)), tp.Next(ctx)
