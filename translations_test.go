@@ -1,10 +1,8 @@
 package goinsta
 
 import (
-	"compress/gzip"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"reflect"
 	"strings"
@@ -31,23 +29,12 @@ func TestTranslationSettings(t *testing.T) {
 func TestSetTranslationSettings(t *testing.T) {
 	insta, _ := newReplay(t)
 	f := fixture(t, "translations_upsert")
-	var got sent
-	insta.SetHTTPClient(&http.Client{Transport: handlerFunc(func(req *http.Request) (int, string) {
-		var body io.Reader = req.Body
-		if req.Header.Get("Content-Encoding") == "gzip" {
-			zr, err := gzip.NewReader(req.Body)
-			if err != nil {
-				t.Fatal(err)
-			}
-			body = zr
-		}
-		raw, _ := io.ReadAll(body)
-		got = sent{req: req, payload: payloadOf(req, raw)}
+	calls := capture(t, insta, func(s sent) (int, string) {
 		var v upsertTranslationsVars
-		_ = json.Unmarshal([]byte(got.payload["variables"].(string)), &v)
+		_ = json.Unmarshal([]byte(fmt.Sprint(s.payload["variables"])), &v)
 		return 200, fmt.Sprintf(`{"data":{"%s":{"client_mutation_id":%q}},"extensions":{"is_final":true}}`,
 			rootUpsertTranslationsCreation, v.Data.ClientMutationID)
-	})})
+	})
 	on, off := true, false
 	err := insta.Account.SetTranslationSettings(t.Context(), TranslationCreationUpdate{
 		VoiceTranslation: &on, LipSync: &on, AcceptedConsent: &on, ApprovalFlow: &off,
@@ -55,9 +42,10 @@ func TestSetTranslationSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	got := (*calls)[0]
 	checkRequest(t, f, got)
-	var gotVars, wantVars map[string]any
-	_ = json.Unmarshal([]byte(got.payload["variables"].(string)), &gotVars)
+	gotVars := got.vars()
+	var wantVars map[string]any
 	_ = json.Unmarshal([]byte(f.ReqForm["variables"]), &wantVars)
 	ga := gotVars["data"].(map[string]any)["args"].(map[string]any)
 	wa := wantVars["data"].(map[string]any)["args"].(map[string]any)

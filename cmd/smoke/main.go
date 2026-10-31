@@ -148,7 +148,8 @@ func readAccountExtras(r *runner, insta *goinsta.Instagram) {
 	})
 	r.step("user.TaggedPosts (own)", func() (string, error) {
 		tp := acc.User().TaggedPosts()
-		return fmt.Sprintf("%d tagged", len(tp.Items)), tp.Next(ctx)
+		err := tp.Next(ctx)
+		return fmt.Sprintf("%d tagged", len(tp.Items)), err
 	})
 	r.step("item.Insights (newest own post)", func() (string, error) {
 		posts := acc.User().Posts()

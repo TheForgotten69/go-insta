@@ -1,55 +1,17 @@
 package goinsta
 
 import (
-	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"testing"
 )
 
-type relCall struct {
-	method, host, path string
-	query              url.Values
-	form               url.Values
-	signed             map[string]any
-	vars               map[string]any
-}
-
-func relRecorder(t *testing.T, insta *Instagram, body string) *relCall {
-	t.Helper()
-	got := &relCall{}
-	insta.SetHTTPClient(&http.Client{Transport: handlerFunc(func(req *http.Request) (int, string) {
-		*got = relCall{method: req.Method, host: req.URL.Host, path: req.URL.Path, query: req.URL.Query()}
-		if req.Body != nil {
-			raw, _ := io.ReadAll(req.Body)
-			if req.Header.Get("Content-Encoding") == "gzip" {
-				zr, err := gzip.NewReader(bytes.NewReader(raw))
-				if err != nil {
-					t.Fatal(err)
-				}
-				raw, _ = io.ReadAll(zr)
-			}
-			got.form, _ = url.ParseQuery(string(raw))
-			if _, js, ok := strings.Cut(got.form.Get("signed_body"), "."); ok {
-				_ = json.Unmarshal([]byte(js), &got.signed)
-			}
-			if v := got.form.Get("variables"); v != "" {
-				_ = json.Unmarshal([]byte(v), &got.vars)
-			}
-		}
-		return 200, body
-	})})
-	return got
-}
-
 func TestRelationshipRequests(t *testing.T) {
 	insta, _ := newReplay(t)
-	got := relRecorder(t, insta, `{"status":"ok","friendship_status":{"blocking":true,"following":false}}`)
+	calls := capture(t, insta, answer(`{"status":"ok","friendship_status":{"blocking":true,"following":false}}`))
+	last := func() sent { return (*calls)[len(*calls)-1] }
 	ctx := t.Context()
 	u := insta.NewUser(77200259753)
 
@@ -76,12 +38,13 @@ func TestRelationshipRequests(t *testing.T) {
 			t.Errorf("%s: %v", tc.name, err)
 			continue
 		}
-		if got.method != "POST" || got.path != tc.path {
-			t.Errorf("%s: %s %s, want POST %s", tc.name, got.method, got.path, tc.path)
+		got := last()
+		if got.req.Method != "POST" || got.req.URL.Path != tc.path {
+			t.Errorf("%s: %s %s, want POST %s", tc.name, got.req.Method, got.req.URL.Path, tc.path)
 		}
 		for k, want := range tc.want {
-			if got.signed[k] != want {
-				t.Errorf("%s: %s = %v, want %v", tc.name, k, got.signed[k], want)
+			if got.payload[k] != want {
+				t.Errorf("%s: %s = %v, want %v", tc.name, k, got.payload[k], want)
 			}
 		}
 	}
@@ -95,11 +58,12 @@ func TestRelationshipRequests(t *testing.T) {
 	if err := insta.Account.UpdateCloseFriends(ctx, []*User{u}, []*User{insta.NewUser(1)}); err != nil {
 		t.Fatal(err)
 	}
-	add, _ := got.signed["add"].([]any)
-	remove, _ := got.signed["remove"].([]any)
-	if got.path != "/api/v1/friendships/set_besties/" || len(add) != 1 || add[0] != "77200259753" ||
-		len(remove) != 1 || remove[0] != "1" || got.signed["block_on_empty_thread_creation"] != "false" {
-		t.Errorf("set_besties = %s %v", got.path, got.signed)
+	got := last()
+	add, _ := got.payload["add"].([]any)
+	remove, _ := got.payload["remove"].([]any)
+	if got.req.URL.Path != "/api/v1/friendships/set_besties/" || len(add) != 1 || add[0] != "77200259753" ||
+		len(remove) != 1 || remove[0] != "1" || got.payload["block_on_empty_thread_creation"] != "false" {
+		t.Errorf("set_besties = %s %v", got.req.URL.Path, got.payload)
 	}
 	if err := insta.Account.UpdateCloseFriends(ctx, nil, nil); err == nil {
 		t.Error("empty close-friends update accepted")
@@ -131,17 +95,19 @@ func TestBlockedUsersPages(t *testing.T) {
 
 func TestFollowRequestGraphQL(t *testing.T) {
 	insta, _ := newReplay(t)
-	got := relRecorder(t, insta, `{"data":{"xdt_friendships_pending_users":{"users":{"edges":[{"node":{"pk":"5","username":"x"}}]}}}}`)
+	calls := capture(t, insta, answer(`{"data":{"xdt_friendships_pending_users":{"users":{"edges":[{"node":{"pk":"5","username":"x"}}]}}}}`))
+	last := func() sent { return (*calls)[len(*calls)-1] }
 	ctx := t.Context()
 
 	users, err := insta.Account.PendingFollowRequests(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.path != "/graphql/query" || got.form.Get("client_doc_id") != docPendingFollows ||
-		got.form.Get("fb_api_req_friendly_name") != "PendingFollows" || got.vars["page_size"] != 20.0 ||
-		got.vars["exclude_su_friendship_status"] != false {
-		t.Errorf("pending: %s %v %v", got.path, got.form, got.vars)
+	got := last()
+	if v := got.vars(); got.req.URL.Path != "/graphql/query" || got.payload["client_doc_id"] != docPendingFollows ||
+		got.payload["fb_api_req_friendly_name"] != "PendingFollows" || v["page_size"] != 20.0 ||
+		v["exclude_su_friendship_status"] != false {
+		t.Errorf("pending: %s %v", got.req.URL.Path, got.payload)
 	}
 	if len(users) != 1 || users[0].Username != "x" || users[0].insta == nil {
 		t.Errorf("pending users = %+v", users)
@@ -154,14 +120,16 @@ func TestFollowRequestGraphQL(t *testing.T) {
 	if err := u.ApproveFollowRequest(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got.path != "/graphql_www" || got.form.Get("client_doc_id") != docApproveFollowRequest ||
-		got.vars["user_id"] != "5" || got.vars["radio_type"] != "ethernet-none" {
-		t.Errorf("approve: %s %v %v", got.path, got.form, got.vars)
+	got = last()
+	if v := got.vars(); got.req.URL.Path != "/graphql_www" || got.payload["client_doc_id"] != docApproveFollowRequest ||
+		v["user_id"] != "5" || v["radio_type"] != "ethernet-none" {
+		t.Errorf("approve: %s %v", got.req.URL.Path, got.payload)
 	}
 	if err := u.IgnoreFollowRequest(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got.path != "/graphql/query" || got.form.Get("client_doc_id") != docIgnoreFollowRequest || got.vars["user_id"] != "5" {
-		t.Errorf("ignore: %s %v %v", got.path, got.form, got.vars)
+	got = last()
+	if v := got.vars(); got.req.URL.Path != "/graphql/query" || got.payload["client_doc_id"] != docIgnoreFollowRequest || v["user_id"] != "5" {
+		t.Errorf("ignore: %s %v", got.req.URL.Path, got.payload)
 	}
 }
