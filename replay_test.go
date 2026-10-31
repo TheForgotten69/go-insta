@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
@@ -35,12 +36,26 @@ var (
 func fixture(t *testing.T, name string) httplog.Entry {
 	t.Helper()
 	fixturesOnce.Do(func() {
-		b, err := os.ReadFile("testdata/fixtures.json")
+		files, err := filepath.Glob("testdata/*.json")
 		if err != nil {
 			panic(err)
 		}
-		if err := json.Unmarshal(b, &fixtures); err != nil {
-			panic(err)
+		fixtures = map[string]httplog.Entry{}
+		for _, f := range files {
+			b, err := os.ReadFile(f)
+			if err != nil {
+				panic(err)
+			}
+			var m map[string]httplog.Entry
+			if err := json.Unmarshal(b, &m); err != nil {
+				panic(fmt.Errorf("%s: %w", f, err))
+			}
+			for k, v := range m {
+				if _, dup := fixtures[k]; dup {
+					panic(fmt.Errorf("fixture %q defined twice (%s)", k, f))
+				}
+				fixtures[k] = v
+			}
 		}
 	})
 	e, ok := fixtures[name]
