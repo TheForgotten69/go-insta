@@ -93,16 +93,19 @@ type Item struct {
 
 	IsPostLive bool `json:"is_post_live"`
 
-	Videos            []Video `json:"video_versions,omitempty"`
-	VideoCodec        string  `json:"video_codec"`
-	HasAudio          bool    `json:"has_audio,omitempty"`
-	VideoDuration     float64 `json:"video_duration,omitempty"`
-	ViewCount         float64 `json:"view_count,omitempty"`
-	PlayCount         float64 `json:"play_count,omitempty"`
-	IsDashEligible    int     `json:"is_dash_eligible,omitempty"`
-	IsUnifiedVideo    bool    `json:"is_unified_video"`
-	VideoDashManifest string  `json:"video_dash_manifest,omitempty"`
-	NumberOfQualities int     `json:"number_of_qualities,omitempty"`
+	Videos        []Video `json:"video_versions,omitempty"`
+	VideoCodec    string  `json:"video_codec"`
+	HasAudio      bool    `json:"has_audio,omitempty"`
+	VideoDuration float64 `json:"video_duration,omitempty"`
+	// AI voice translation state of a Reel; see VoiceTranslations.
+	TranslatedLangsForAutodub []string          `json:"translated_langs_for_autodub,omitempty"`
+	AutodubStatus             []json.RawMessage `json:"autodub_status,omitempty"`
+	ViewCount                 float64           `json:"view_count,omitempty"`
+	PlayCount                 float64           `json:"play_count,omitempty"`
+	IsDashEligible            int               `json:"is_dash_eligible,omitempty"`
+	IsUnifiedVideo            bool              `json:"is_unified_video"`
+	VideoDashManifest         string            `json:"video_dash_manifest,omitempty"`
+	NumberOfQualities         int               `json:"number_of_qualities,omitempty"`
 
 	Title                    string `json:"title"`
 	IGTVExistsInViewerSeries bool   `json:"igtv_exists_in_viewer_series"`

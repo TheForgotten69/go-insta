@@ -67,11 +67,11 @@ func (account *Account) TranslationSettings(ctx context.Context) (*TranslationSe
 // TranslationCreationUpdate changes the account's AI voice translation
 // choices; a nil field is left as it is (the app sends it as null).
 type TranslationCreationUpdate struct {
-	VoiceTranslation *bool
-	LipSync          *bool
-	ApprovalFlow     *bool
-	AcceptedConsent  *bool
-	SeenConsent      *bool
+	VoiceTranslation *bool `json:"voice_translation_opt_in"`
+	SeenConsent      *bool `json:"has_seen_voice_translations_consent_nux"`
+	LipSync          *bool `json:"lip_sync_opt_in"`
+	AcceptedConsent  *bool `json:"has_accepted_voice_translations_consent_nux"`
+	ApprovalFlow     *bool `json:"approval_flow_opt_in"`
 }
 
 type upsertTranslationsVars struct {
@@ -84,12 +84,8 @@ type upsertTranslationsData struct {
 }
 
 type upsertTranslationsArgs struct {
-	VoiceTranslation *bool  `json:"voice_translation_opt_in"`
-	SeenConsent      *bool  `json:"has_seen_voice_translations_consent_nux"`
-	UserIGID         string `json:"user_igid"`
-	LipSync          *bool  `json:"lip_sync_opt_in"`
-	AcceptedConsent  *bool  `json:"has_accepted_voice_translations_consent_nux"`
-	ApprovalFlow     *bool  `json:"approval_flow_opt_in"`
+	TranslationCreationUpdate
+	UserIGID string `json:"user_igid"`
 }
 
 // SetTranslationSettings saves u, as the app's AI voice translation screen does.
@@ -106,14 +102,7 @@ func (account *Account) SetTranslationSettings(ctx context.Context, u Translatio
 		root:     rootUpsertTranslationsCreation,
 	}, upsertTranslationsVars{Data: upsertTranslationsData{
 		ClientMutationID: id,
-		Args: upsertTranslationsArgs{
-			VoiceTranslation: u.VoiceTranslation,
-			SeenConsent:      u.SeenConsent,
-			UserIGID:         account.ID.String(),
-			LipSync:          u.LipSync,
-			AcceptedConsent:  u.AcceptedConsent,
-			ApprovalFlow:     u.ApprovalFlow,
-		},
+		Args:             upsertTranslationsArgs{TranslationCreationUpdate: u, UserIGID: account.ID.String()},
 	}}, &ack)
 	if err != nil {
 		return err
@@ -133,14 +122,9 @@ type VoiceTranslations struct {
 
 // VoiceTranslations reads the Reel's AI voice translation state from its media info.
 func (item *Item) VoiceTranslations(ctx context.Context) (*VoiceTranslations, error) {
-	var resp struct {
-		Items []VoiceTranslations `json:"items"`
-	}
-	if err := item.insta.callJSON(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlMediaInfo, item.ID)}, &resp); err != nil {
+	it, err := item.insta.MediaInfo(ctx, item.ID)
+	if err != nil {
 		return nil, err
 	}
-	if len(resp.Items) == 0 {
-		return nil, ErrNoMedia
-	}
-	return &resp.Items[0], nil
+	return &VoiceTranslations{Languages: it.TranslatedLangsForAutodub, Status: it.AutodubStatus}, nil
 }
