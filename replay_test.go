@@ -234,6 +234,8 @@ var skippedHeaders = map[string]bool{
 	"x-ig-app-start-time": true, "x-ig-app-start-request": true, "x-cm-bandwidth-kbps": true,
 	"x-cm-latency": true, "retry_context": true, "x-ig-nav-chain": true, "x-ig-salt-ids": true,
 	"content-length": true, // set by the transport, not visible on the request headers
+	// Throttling telemetry on a few requests of the 2026-10-31 00:07 capture only.
+	"x-meta-tasos-td-rates": true, "x-meta-tasos-td-signal": true,
 	// A session token seen in the 2026-10-30 16:16 capture only; no response sets it.
 	"x-ig-session-visitation": true,
 }
@@ -267,6 +269,13 @@ var uaDevice = regexp.MustCompile(`Android \(.*; ([a-z]{2}_[A-Z]{2}; \d+)\)`)
 
 func checkRequest(t *testing.T, want httplog.Entry, got sent, extraOK ...string) {
 	t.Helper()
+	if h := want.ReqHeaders; want.Path == "/graphql/query" && h["x-ig-validate-null-in-legacy-dict"] != "" {
+		// The 2026-10-27 build sent the plain dict header to graphql/query; later ones send eager-dict.
+		h = maps.Clone(h)
+		h["x-ig-validate-null-in-legacy-eager-dict"] = h["x-ig-validate-null-in-legacy-dict"]
+		delete(h, "x-ig-validate-null-in-legacy-dict")
+		want.ReqHeaders = h
+	}
 	if got.req.Method != want.Method {
 		t.Errorf("method = %s, want %s", got.req.Method, want.Method)
 	}

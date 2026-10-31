@@ -1,10 +1,10 @@
 package goinsta
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"reflect"
 	"strings"
@@ -19,7 +19,7 @@ func TestTranslationSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := withGraphQLDeviations(fixture(t, "translations_user"))
+	f := fixture(t, "translations_user")
 	checkRequest(t, f, r.sent[0])
 	checkVars(t, f, r.sent[0])
 	if len(s.PreferredLanguages.Unselected) == 0 || len(s.TranslateFrom) == 0 || s.SubtitlesLanguage == "" {
@@ -30,10 +30,18 @@ func TestTranslationSettings(t *testing.T) {
 // The mutation echoes client_mutation_id, so this answers with the id the request sent.
 func TestSetTranslationSettings(t *testing.T) {
 	insta, _ := newReplay(t)
-	f := withGraphQLDeviations(fixture(t, "translations_upsert"))
+	f := fixture(t, "translations_upsert")
 	var got sent
 	insta.SetHTTPClient(&http.Client{Transport: handlerFunc(func(req *http.Request) (int, string) {
-		raw, _ := io.ReadAll(req.Body)
+		var body io.Reader = req.Body
+		if req.Header.Get("Content-Encoding") == "gzip" {
+			zr, err := gzip.NewReader(req.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body = zr
+		}
+		raw, _ := io.ReadAll(body)
 		got = sent{req: req, payload: payloadOf(req, raw)}
 		var v upsertTranslationsVars
 		_ = json.Unmarshal([]byte(got.payload["variables"].(string)), &v)
@@ -74,24 +82,6 @@ func TestVoiceTranslations(t *testing.T) {
 	if err != nil || path != "/api/v1/media/1_2/info/" || strings.Join(vt.Languages, ",") != "eng,spa" {
 		t.Errorf("VoiceTranslations = %+v, %v (path %s)", vt, err, path)
 	}
-}
-
-// withGraphQLDeviations expects what graphQL() sends today where these captures
-// differ: the app gzips per query (TranslationsUserQuery plain on graphql/query,
-// the upsert gzipped on graphql_www) and sends the eager-dict null header on
-// some queries. gqlQuery cannot express either yet.
-func withGraphQLDeviations(f httplog.Entry) httplog.Entry {
-	f.ReqHeaders = maps.Clone(f.ReqHeaders)
-	if f.Path == "/graphql/query" {
-		f.ReqHeaders["content-encoding"] = "gzip"
-	} else {
-		delete(f.ReqHeaders, "content-encoding")
-	}
-	if _, eager := f.ReqHeaders["x-ig-validate-null-in-legacy-eager-dict"]; eager {
-		delete(f.ReqHeaders, "x-ig-validate-null-in-legacy-eager-dict")
-		f.ReqHeaders["x-ig-validate-null-in-legacy-dict"] = "true"
-	}
-	return f
 }
 
 // checkVars compares the request's GraphQL variables with the fixture's.

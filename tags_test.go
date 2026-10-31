@@ -2,7 +2,6 @@ package goinsta
 
 import (
 	"encoding/json"
-	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -15,11 +14,7 @@ func TestTaggedPosts(t *testing.T) {
 	if err := tagged.Next(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	// The 2026-10-31 capture adds two tasos headers the library does not send yet.
 	f := fixture(t, "usertags_feed")
-	f.ReqHeaders = maps.Clone(f.ReqHeaders)
-	delete(f.ReqHeaders, "x-meta-tasos-td-rates")
-	delete(f.ReqHeaders, "x-meta-tasos-td-signal")
 	checkRequest(t, f, r.sent[0])
 	if len(tagged.Items) != 2 || tagged.Items[1].Index != 1 || tagged.Items[0].insta == nil || !tagged.More() {
 		t.Fatalf("page 1: %d items, more %v", len(tagged.Items), tagged.More())

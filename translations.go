@@ -117,6 +117,7 @@ func (account *Account) SetTranslationSettings(ctx context.Context, u Translatio
 	id := generateUUID()
 	body, err := account.insta.graphQL(ctx, gqlQuery{
 		url:      graphQLWWWURL,
+		gzip:     true,
 		friendly: friendlyUpsertTranslationsInput,
 		docID:    docUpsertTranslationsCreation,
 		root:     rootUpsertTranslationsCreation,

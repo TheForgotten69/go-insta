@@ -27,6 +27,7 @@ type gqlQuery struct {
 	docID    string
 	root     string
 	purpose  string // "fetch", "refresh" or "prefetch"; "" omits it, as list and search queries do
+	gzip     bool   // per query in the captures, not per endpoint
 }
 
 type graphQLForm struct {
@@ -57,11 +58,11 @@ func (insta *Instagram) graphQL(ctx context.Context, gq gqlQuery, vars any) ([]b
 		Purpose:          gq.purpose,
 	}
 	headers := map[string]string{
-		"Content-Type":                      "application/x-www-form-urlencoded",
-		"X-Client-Doc-Id":                   gq.docID,
-		"X-Ig-Validate-Null-In-Legacy-Dict": "true",
-		"X-Graphql-Client-Library":          "pando",
-		"X-Root-Field-Name":                 gq.root,
+		"Content-Type":             "application/x-www-form-urlencoded",
+		"X-Client-Doc-Id":          gq.docID,
+		validateNullHeader(url):    "true",
+		"X-Graphql-Client-Library": "pando",
+		"X-Root-Field-Name":        gq.root,
 	}
 	tagPurpose := "none"
 	if gq.purpose != "" {
@@ -77,7 +78,7 @@ func (insta *Instagram) graphQL(ctx context.Context, gq gqlQuery, vars any) ([]b
 	body, err := insta.call(ctx, &reqOptions{
 		Endpoint: url,
 		IsPost:   true,
-		Gzip:     url == graphQLURL, // graphql_www bodies go uncompressed
+		Gzip:     gq.gzip,
 		Priority: "u=3, i",
 		IgnoreHeaders: append([]string{"X-Ig-Www-Claim", "X-Ig-Family-Device-Id", "X-Fb-Connection-Type",
 			"X-Ig-Connection-Type", "X-Ig-Client-Endpoint", "X-Ig-Bloks-Serialize-Payload",
@@ -148,12 +149,30 @@ func decodeNumber(b []byte, v any) error {
 	return d.Decode(v)
 }
 
+// validateNullHeader is the null-validation header the app sends to each endpoint.
+func validateNullHeader(url string) string {
+	if url == graphQLURL {
+		return "X-Ig-Validate-Null-In-Legacy-Eager-Dict"
+	}
+	return "X-Ig-Validate-Null-In-Legacy-Dict"
+}
+
 func applyPatch(node any, path []any, data any) error {
 	for _, step := range path {
 		switch n := node.(type) {
 		case map[string]any:
 			k, _ := step.(string)
-			node = n[k]
+			v, ok := n[k]
+			if !ok {
+				// The skeleton may key a root field "1$<field>" while patches use "<field>".
+				for key, val := range n {
+					if strings.HasSuffix(key, "$"+k) {
+						v = val
+						break
+					}
+				}
+			}
+			node = v
 		case []any:
 			i, err := step.(json.Number).Int64()
 			if err != nil || i < 0 || int(i) >= len(n) {
@@ -206,7 +225,7 @@ func (user *User) Posts() *Pager[*Item] {
 			vars.RequestMediaChunk = false
 		}
 		body, err := user.insta.graphQL(ctx, gqlQuery{friendly: "IGProfileTimelineQuery", docID: docProfileTimeline,
-			root: "xdt_api__v1__profile_timeline", purpose: "fetch"}, vars)
+			root: "xdt_api__v1__profile_timeline", purpose: "fetch", gzip: true}, vars)
 		if gqlErr := (*GraphQLError)(nil); user.IsPrivate && errors.As(err, &gqlErr) {
 			err = fmt.Errorf("%w: %w", ErrPrivateAccount, err)
 		}

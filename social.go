@@ -210,7 +210,7 @@ func (user *User) followList(friendly, doc, root string, entry entryContext, var
 	insta := user.insta
 	var maxID string
 	return newPager(func(ctx context.Context) ([]*User, string, error) {
-		body, err := insta.graphQL(ctx, gqlQuery{friendly: friendly, docID: doc, root: root}, varsFor(user.ID, maxID))
+		body, err := insta.graphQL(ctx, gqlQuery{friendly: friendly, docID: doc, root: root, gzip: true}, varsFor(user.ID, maxID))
 		if err != nil {
 			return nil, "", err
 		}
