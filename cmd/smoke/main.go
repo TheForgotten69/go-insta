@@ -80,8 +80,10 @@ func main() {
 
 	r := &runner{ctx: ctx, pause: *pause}
 	readAccount(r, insta, dir)
+	readAccountExtras(r, insta)
 	firstPost := readFeeds(r, insta)
 	user := readUser(r, insta, *target, dir)
+	readPlaces(r, insta)
 	if firstPost != nil {
 		r.step("item.Comments (2 pages)", func() (string, error) {
 			c := firstPost.Comments()
@@ -91,8 +93,7 @@ func main() {
 	}
 	if *writes {
 		if user != nil {
-			r.step("user.Follow", func() (string, error) { return "@" + user.Username, user.Follow(ctx) })
-			r.step("user.Unfollow", func() (string, error) { return "@" + user.Username, user.Unfollow(ctx) })
+			writeRelationships(r, insta, user)
 		}
 		writeAccount(r, insta)
 		writePost(r, insta)
@@ -116,6 +117,92 @@ func main() {
 	if r.bad > 0 {
 		os.Exit(1)
 	}
+}
+
+func readAccountExtras(r *runner, insta *goinsta.Instagram) {
+	ctx, acc := r.ctx, insta.Account
+	r.step("account.TranslationSettings", func() (string, error) {
+		s, err := acc.TranslationSettings(ctx)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("voice translation=%v", s.Creation.VoiceTranslation), nil
+	})
+	r.step("account.BlockedUsers", func() (string, error) {
+		b, err := acc.BlockedUsers(ctx)
+		return fmt.Sprintf("%d blocked", len(b)), err
+	})
+	r.step("account.PendingFollowRequests", func() (string, error) {
+		p, err := acc.PendingFollowRequests(ctx)
+		return fmt.Sprintf("%d pending", len(p)), err
+	})
+	r.step("user.TaggedPosts (own)", func() (string, error) {
+		tp := acc.User().TaggedPosts()
+		return fmt.Sprintf("%d tagged", len(tp.Items)), tp.Next(ctx)
+	})
+	r.step("item.Insights (newest own post)", func() (string, error) {
+		posts := acc.User().Posts()
+		if err := posts.Next(ctx); err != nil || len(posts.Items) == 0 {
+			return "no own post", err
+		}
+		in, err := posts.Items[0].Insights(ctx)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("likes=%d views=%d", in.Likes, in.TotalViews), nil
+	})
+}
+
+func readPlaces(r *runner, insta *goinsta.Instagram) {
+	ctx := r.ctx
+	var loc *goinsta.Location
+	r.step("SearchLocations", func() (string, error) {
+		ls, err := insta.SearchLocations(ctx, "Paris", 0, 0)
+		if err != nil || len(ls) == 0 {
+			return "0 places", err
+		}
+		loc = &ls[0]
+		return fmt.Sprintf("%d places, first %q", len(ls), ls[0].Name), nil
+	})
+	if loc == nil {
+		return
+	}
+	r.step("LocationInfo + LocationFeed", func() (string, error) {
+		info, err := insta.LocationInfo(ctx, int64(loc.ID))
+		if err != nil {
+			return "", err
+		}
+		feed := insta.LocationFeed(int64(loc.ID), goinsta.LocationTabRanked)
+		if err := feed.Next(ctx); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s: %d posts", info.ShortName, len(feed.Items)), nil
+	})
+}
+
+func writeRelationships(r *runner, insta *goinsta.Instagram, user *goinsta.User) {
+	ctx := r.ctx
+	r.step("user.Follow", func() (string, error) { return "@" + user.Username, user.Follow(ctx) })
+	r.step("user.Mute + Unmute", func() (string, error) {
+		if err := user.Mute(ctx, true, true); err != nil {
+			return "", err
+		}
+		return "", user.Unmute(ctx, true, true)
+	})
+	r.step("user.Unfollow", func() (string, error) { return "@" + user.Username, user.Unfollow(ctx) })
+	r.step("user.Block + Unblock", func() (string, error) {
+		if err := user.Block(ctx); err != nil {
+			return "", err
+		}
+		return "", user.Unblock(ctx)
+	})
+	r.step("account.UpdateCloseFriends add + remove", func() (string, error) {
+		acc := insta.Account
+		if err := acc.UpdateCloseFriends(ctx, []*goinsta.User{user}, nil); err != nil {
+			return "", err
+		}
+		return "", acc.UpdateCloseFriends(ctx, nil, []*goinsta.User{user})
+	})
 }
 
 func readAccount(r *runner, insta *goinsta.Instagram, dir string) {
