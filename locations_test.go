@@ -65,10 +65,10 @@ func TestLocations(t *testing.T) {
 		t.Error("feed should end")
 	}
 
-	if got := coordinate(48.8566, 2.35222, 48.8566); got != "48.8566" {
-		t.Errorf("coordinate = %q", got)
+	if got := javaDouble(48.8566); got != "48.8566" {
+		t.Errorf("javaDouble = %q", got)
 	}
-	if got := coordinate(45, 3, 45); got != "45.0" {
-		t.Errorf("coordinate = %q", got)
+	if got := javaDouble(45); got != "45.0" {
+		t.Errorf("javaDouble = %q", got)
 	}
 }

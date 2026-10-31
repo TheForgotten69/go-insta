@@ -2,7 +2,6 @@ package goinsta
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -111,9 +110,6 @@ func TestFollowRequestGraphQL(t *testing.T) {
 	}
 	if len(users) != 1 || users[0].Username != "x" || users[0].insta == nil {
 		t.Errorf("pending users = %+v", users)
-	}
-	if list, err := decodeUserConnection(json.RawMessage(`[{"pk":"6","username":"y"}]`)); err != nil || len(list) != 1 {
-		t.Errorf("plain list: %v %v", list, err)
 	}
 
 	u := insta.NewUser(5)

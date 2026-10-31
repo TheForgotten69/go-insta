@@ -29,7 +29,11 @@ func (insta *Instagram) SearchLocations(ctx context.Context, query string, lat, 
 	var resp struct {
 		Venues []venue `json:"venues"`
 	}
-	if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlLocationSearch, Form: locationSearchQuery{SearchQuery: query, Latitude: coordinate(lat, lng, lat), Longitude: coordinate(lat, lng, lng)}}, &resp); err != nil {
+	q := locationSearchQuery{SearchQuery: query, Latitude: "0.000000", Longitude: "0.000000"}
+	if lat != 0 || lng != 0 {
+		q.Latitude, q.Longitude = javaDouble(lat), javaDouble(lng)
+	}
+	if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlLocationSearch, Form: q}, &resp); err != nil {
 		return nil, err
 	}
 	out := make([]Location, len(resp.Venues))
@@ -42,12 +46,8 @@ func (insta *Instagram) SearchLocations(ctx context.Context, query string, lat, 
 	return out, nil
 }
 
-// coordinate formats v like Java's String.valueOf(double), or "0.000000" when
-// there is no position at all.
-func coordinate(lat, lng, v float64) string {
-	if lat == 0 && lng == 0 {
-		return "0.000000"
-	}
+// javaDouble formats v like Java's String.valueOf(double).
+func javaDouble(v float64) string {
 	s := strconv.FormatFloat(v, 'f', -1, 64)
 	if !strings.Contains(s, ".") {
 		s += ".0"

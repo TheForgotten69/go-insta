@@ -2,7 +2,6 @@ package goinsta
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 )
@@ -172,44 +171,24 @@ type pendingFollowsVars struct {
 // accept their follow request; first page only, as the app's request screen.
 func (account *Account) PendingFollowRequests(ctx context.Context) ([]*User, error) {
 	var pending struct {
-		Users json.RawMessage `json:"users"`
+		Users struct {
+			Edges []struct {
+				Node *User `json:"node"`
+			} `json:"edges"`
+		} `json:"users"`
 	}
 	err := account.insta.graphQLRoot(ctx, gqlQuery{friendly: "PendingFollows", docID: docPendingFollows,
 		root: "xdt_friendships_pending_users"}, pendingFollowsVars{PageSize: 20, ExcludeSuggestedUsers: true}, &pending)
 	if err != nil {
 		return nil, err
 	}
-	users, err := decodeUserConnection(pending.Users)
-	if err != nil {
-		return nil, err
-	}
-	return account.insta.usersFrom(users, entryContext{}), nil
-}
-
-// decodeUserConnection reads either a plain user list or a connection with
-// edges[].node; the decompiled query names a "users" connection.
-func decodeUserConnection(raw json.RawMessage) ([]*User, error) {
-	if len(raw) == 0 || string(raw) == "null" {
-		return nil, nil
-	}
-	var users []*User
-	if json.Unmarshal(raw, &users) == nil {
-		return users, nil
-	}
-	var conn struct {
-		Edges []struct {
-			Node *User `json:"node"`
-		} `json:"edges"`
-	}
-	if err := json.Unmarshal(raw, &conn); err != nil {
-		return nil, fmt.Errorf("pending users: %w", err)
-	}
-	for _, e := range conn.Edges {
+	users := make([]*User, 0, len(pending.Users.Edges))
+	for _, e := range pending.Users.Edges {
 		if e.Node != nil {
 			users = append(users, e.Node)
 		}
 	}
-	return users, nil
+	return account.insta.usersFrom(users, entryContext{}), nil
 }
 
 type followRequestVars struct {
