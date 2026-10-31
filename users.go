@@ -150,30 +150,30 @@ type User struct {
 	Friendship                   Friendship   `json:"friendship_status"`
 	AutoExpandChaining           bool         `json:"auto_expand_chaining"`
 
-	AllowedToCreateNonprofitFundraisers        bool     `json:"is_allowed_to_create_standalone_nonprofit_fundraisers"`
-	AllowedToCreatePersonalFundraisers         bool     `json:"is_allowed_to_create_standalone_personal_fundraisers"`
-	IsEligibleToShowFbCrossSharingNux          bool     `json:"is_eligible_to_show_fb_cross_sharing_nux"`
-	PageIDForNewSumaBizAccount                 any      `json:"page_id_for_new_suma_biz_account"`
-	EligibleShoppingSignupEntrypoints          []any    `json:"eligible_shopping_signup_entrypoints"`
-	IsIgdProductPickerEnabled                  bool     `json:"is_igd_product_picker_enabled"`
-	IsEligibleForAffiliateShopOnboarding       bool     `json:"is_eligible_for_affiliate_shop_onboarding"`
-	IsEligibleForSMBSupportFlow                bool     `json:"is_eligible_for_smb_support_flow"`
-	EligibleShoppingFormats                    []any    `json:"eligible_shopping_formats"`
-	NeedsToAcceptShoppingSellerOnboardingTerms bool     `json:"needs_to_accept_shopping_seller_onboarding_terms"`
-	SellerShoppableFeedType                    string   `json:"seller_shoppable_feed_type"`
-	VisibleProducts                            int      `json:"num_visible_storefront_products"`
-	IsShoppingCatalogSettingsEnabled           bool     `json:"is_shopping_settings_enabled"`
-	IsShoppingCommunityContentEnabled          bool     `json:"is_shopping_community_content_enabled"`
-	IsShoppingAutoHighlightEnabled             bool     `json:"is_shopping_auto_highlight_eligible"`
-	IsShoppingCatalogSourceSelectionEnabled    bool     `json:"is_shopping_catalog_source_selection_enabled"`
-	ProfessionalConversionSuggestedAccountType int      `json:"professional_conversion_suggested_account_type"`
-	InteropMessagingUserfbid                   Int64    `json:"interop_messaging_user_fbid"`
-	LinkedFbInfo                               struct{} `json:"linked_fb_info"`
-	HasEligibleWhatsappLinkingCategory         struct{} `json:"has_eligible_whatsapp_linking_category"`
-	ExistingUserAgeCollectionEnabled           bool     `json:"existing_user_age_collection_enabled"`
-	AboutYourAccountBloksEntrypointEnabled     bool     `json:"about_your_account_bloks_entrypoint_enabled"`
-	OpenExternalUrlWithInAppBrowser            bool     `json:"open_external_url_with_in_app_browser"`
-	MerchantCheckoutStyle                      string   `json:"merchant_checkout_style"`
+	AllowedToCreateNonprofitFundraisers        bool            `json:"is_allowed_to_create_standalone_nonprofit_fundraisers"`
+	AllowedToCreatePersonalFundraisers         bool            `json:"is_allowed_to_create_standalone_personal_fundraisers"`
+	IsEligibleToShowFbCrossSharingNux          bool            `json:"is_eligible_to_show_fb_cross_sharing_nux"`
+	PageIDForNewSumaBizAccount                 any             `json:"page_id_for_new_suma_biz_account"`
+	EligibleShoppingSignupEntrypoints          []any           `json:"eligible_shopping_signup_entrypoints"`
+	IsIgdProductPickerEnabled                  bool            `json:"is_igd_product_picker_enabled"`
+	IsEligibleForAffiliateShopOnboarding       bool            `json:"is_eligible_for_affiliate_shop_onboarding"`
+	IsEligibleForSMBSupportFlow                bool            `json:"is_eligible_for_smb_support_flow"`
+	EligibleShoppingFormats                    []any           `json:"eligible_shopping_formats"`
+	NeedsToAcceptShoppingSellerOnboardingTerms bool            `json:"needs_to_accept_shopping_seller_onboarding_terms"`
+	SellerShoppableFeedType                    string          `json:"seller_shoppable_feed_type"`
+	VisibleProducts                            int             `json:"num_visible_storefront_products"`
+	IsShoppingCatalogSettingsEnabled           bool            `json:"is_shopping_settings_enabled"`
+	IsShoppingCommunityContentEnabled          bool            `json:"is_shopping_community_content_enabled"`
+	IsShoppingAutoHighlightEnabled             bool            `json:"is_shopping_auto_highlight_eligible"`
+	IsShoppingCatalogSourceSelectionEnabled    bool            `json:"is_shopping_catalog_source_selection_enabled"`
+	ProfessionalConversionSuggestedAccountType int             `json:"professional_conversion_suggested_account_type"`
+	InteropMessagingUserfbid                   Int64           `json:"interop_messaging_user_fbid"`
+	LinkedFbInfo                               json.RawMessage `json:"linked_fb_info"`
+	HasEligibleWhatsappLinkingCategory         json.RawMessage `json:"has_eligible_whatsapp_linking_category"`
+	ExistingUserAgeCollectionEnabled           bool            `json:"existing_user_age_collection_enabled"`
+	AboutYourAccountBloksEntrypointEnabled     bool            `json:"about_your_account_bloks_entrypoint_enabled"`
+	OpenExternalUrlWithInAppBrowser            bool            `json:"open_external_url_with_in_app_browser"`
+	MerchantCheckoutStyle                      string          `json:"merchant_checkout_style"`
 
 	ProfilePic []byte
 }

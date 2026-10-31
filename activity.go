@@ -110,8 +110,8 @@ type RecentItems struct {
 		Destination     string   `json:"destination"`
 		Extra           any      `json:"extra"`
 	} `json:"args"`
-	Counts struct{} `json:"counts"`
-	Pk     string   `json:"pk"`
+	Counts json.RawMessage `json:"counts"`
+	Pk     string          `json:"pk"`
 }
 
 type activityQuery struct {
