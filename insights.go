@@ -58,8 +58,8 @@ func (item *Item) Insights(ctx context.Context) (*Insights, error) {
 	return parseInsights(body)
 }
 
-// parseInsights reads the merged response, whose root key is aliased
-// ("1$ig_post_insights(bloks_versioning_id:…,media_igid:…)").
+// parseInsights reads the response; the root key is "ig_post_insights" live and
+// aliased ("1$ig_post_insights(bloks_versioning_id:…,media_igid:…)") in the capture.
 func parseInsights(body []byte) (*Insights, error) {
 	var resp struct {
 		Data map[string]json.RawMessage `json:"data"`
@@ -68,7 +68,7 @@ func parseInsights(body []byte) (*Insights, error) {
 		return nil, err
 	}
 	for k, raw := range resp.Data {
-		if !strings.Contains(k, rootPostInsights+"(") {
+		if k != rootPostInsights && !strings.Contains(k, rootPostInsights+"(") {
 			continue
 		}
 		var in Insights

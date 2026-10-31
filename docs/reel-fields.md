@@ -209,7 +209,7 @@ start_time_ms, swappable_text, tool, has_voiceover_attribution).
 | `title` | shared | upload/map | Extra |  |
 | `tools` | shared | upload/map | Extra |  |
 | `transcription_data` | shared | string | Extra |  |
-| `trial_params` | reel | json | Trial | raw JSON {"graduation_strategy": "manual"|"ss_performance"|"time_limit"}; a string gets HTTP 500 "'str' object has no attribute 'get'"; HTTP 500 on a personal account |
+| `trial_params` | reel | json | Trial | raw JSON {"graduation_strategy": "manual"|"ss_performance"|"time_limit"}; a string gets HTTP 500 "'str' object has no attribute 'get'"; HTTP 500 on a personal account, and the Reel may still be published as a normal public Reel |
 | `upload_engine_config_enum` | shared | upload/map | Extra |  |
 | `upload_id` | shared | string/upload/map | (set) |  |
 | `video_edit_params` | shared | upload/map | Extra |  |

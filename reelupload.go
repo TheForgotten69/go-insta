@@ -37,8 +37,9 @@ type ReelOptions struct {
 	Audience         Audience
 	// CoverFrameMs picks the cover frame at that offset into the video.
 	CoverFrameMs int
-	// Trial posts a trial Reel, shown to non-followers first. A personal
-	// account gets HTTP 500; Instagram offers trials to professional accounts.
+	// Trial posts a trial Reel, shown to non-followers first; Instagram offers
+	// trials to professional accounts. A personal account gets HTTP 500, and the
+	// Reel may still be published as a normal, public Reel.
 	Trial TrialStrategy
 	// VoiceTranslation asks for AI voice translation of the audio. The app also
 	// has an upload-time form (autodub_creation_params) that needs its segmented
