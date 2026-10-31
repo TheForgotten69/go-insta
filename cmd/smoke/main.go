@@ -599,23 +599,7 @@ func writePost(r *runner, insta *goinsta.Instagram) {
 		b, err := post.Download(ctx)
 		return fmt.Sprintf("%d bytes", len(b)), err
 	})
-	r.step("UploadStory (linked to post)", func() (string, error) {
-		story, err := insta.UploadStory(ctx, testJPEG(120), goinsta.StoryOptions{LinkPost: post})
-		if err != nil {
-			return "", err
-		}
-		linked := len(story.StoryFeedMedia) == 1
-		if linked {
-			m, _ := story.StoryFeedMedia[0].(map[string]any)
-			linked = m["media_id"] == fmt.Sprint(int64(post.Pk))
-		}
-		summary := fmt.Sprintf("%s, %d post stickers", story.ID, len(story.StoryFeedMedia))
-		var err2 error
-		if !linked {
-			err2 = errors.New("story does not link the post: " + summary)
-		}
-		return summary, errors.Join(err2, story.Delete(ctx))
-	})
+	r.step("UploadStory (linked to post)", func() (string, error) { return linkedStory(ctx, insta, post) })
 	r.step("item.Pin", func() (string, error) { return "", post.Pin(ctx) })
 	r.step("item.AddNote", func() (string, error) {
 		n, err := post.AddNote(ctx, "smoke")
@@ -832,6 +816,7 @@ func writeReel(r *runner, insta *goinsta.Instagram, file string, keep bool) {
 		}
 		return "", it.SetDownloads(ctx, true)
 	})
+	r.step("UploadStory (linked to reel)", func() (string, error) { return linkedStory(ctx, insta, it) })
 	r.step("item.ReelInsights", func() (string, error) {
 		in, err := it.ReelInsights(ctx)
 		if err != nil {
@@ -911,6 +896,23 @@ func writeHighlight(r *runner, insta *goinsta.Instagram, keep bool) {
 	for _, s := range stories {
 		r.step("item.Delete (highlight story)", func() (string, error) { return s.ID, s.Delete(ctx) })
 	}
+}
+
+func linkedStory(ctx context.Context, insta *goinsta.Instagram, post *goinsta.Item) (string, error) {
+	story, err := insta.UploadStory(ctx, testJPEG(120), goinsta.StoryOptions{LinkPost: post})
+	if err != nil {
+		return "", err
+	}
+	linked := len(story.StoryFeedMedia) == 1
+	if linked {
+		m, _ := story.StoryFeedMedia[0].(map[string]any)
+		linked = m["media_id"] == fmt.Sprint(int64(post.Pk))
+	}
+	summary := fmt.Sprintf("%s, %d post stickers", story.ID, len(story.StoryFeedMedia))
+	if !linked {
+		err = errors.New("story does not link the post: " + summary)
+	}
+	return summary, errors.Join(err, story.Delete(ctx))
 }
 
 func expect(ok bool, format string, args ...any) (string, error) {

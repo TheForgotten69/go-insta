@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The project uses
 
 ## [Unreleased]
 
+### Features
+
+- `StoryOptions.LinkPost` also links Reels (verified live).
+
 ## [0.7.1] - 2026-10-31
 
 ### Breaking
