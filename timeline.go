@@ -124,6 +124,7 @@ func (tl *Timeline) fetch(ctx context.Context, reason string) ([]*Item, string, 
 	default:
 		headers["X-Ig-Accept-Hint"] = "feed"
 	}
+	headers["X-Ig-Tail-Load-Request"] = tail
 
 	body, err := insta.call(ctx, &reqOptions{
 		Endpoint:     urlTimeline,
@@ -133,7 +134,7 @@ func (tl *Timeline) fetch(ctx context.Context, reason string) ([]*Item, string, 
 		Stream:       true,
 		Priority:     "u=0",
 		Query:        q,
-		ExtraHeaders: mergeForms(headers, map[string]string{"X-Ig-Tail-Load-Request": tail}),
+		ExtraHeaders: headers,
 	})
 	if err != nil {
 		return nil, "", err

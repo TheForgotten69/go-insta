@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	mrand "math/rand/v2"
+	"strconv"
 	"time"
 	"unicode/utf16"
 )
@@ -20,6 +21,39 @@ func signedBody(payload any) (map[string]string, error) {
 		return nil, err
 	}
 	return map[string]string{"signed_body": "SIGNATURE." + string(b)}, nil
+}
+
+// formOf encodes a request struct as form or query values through its json
+// tags: string fields as they are, any other field as its JSON text.
+func formOf(v any) (map[string]string, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return nil, fmt.Errorf("form %T: %w", v, err)
+	}
+	out := make(map[string]string, len(raw))
+	for k, r := range raw {
+		var s string
+		if json.Unmarshal(r, &s) == nil {
+			out[k] = s
+		} else {
+			out[k] = string(r)
+		}
+	}
+	return out, nil
+}
+
+// sessionIDs is the _uid/_uuid pair most signed bodies carry.
+type sessionIDs struct {
+	UID  string `json:"_uid"`
+	UUID string `json:"_uuid"`
+}
+
+func (insta *Instagram) sessionIDs() sessionIDs {
+	return sessionIDs{UID: strconv.FormatInt(insta.userID(), 10), UUID: insta.uuid}
 }
 
 func generateUUID() string {

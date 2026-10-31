@@ -23,7 +23,7 @@ func (f handlerFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return &http.Response{StatusCode: code, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
 }
 
-func formOf(t *testing.T, req *http.Request) url.Values {
+func sentForm(t *testing.T, req *http.Request) url.Values {
 	t.Helper()
 	raw, _ := io.ReadAll(req.Body)
 	v, err := url.ParseQuery(string(raw))
@@ -161,7 +161,7 @@ func TestLoadReelsBatches(t *testing.T) {
 		var p struct {
 			ReelIDs []string `json:"reel_ids"`
 		}
-		_, js, _ := strings.Cut(formOf(t, req).Get("signed_body"), ".")
+		_, js, _ := strings.Cut(sentForm(t, req).Get("signed_body"), ".")
 		_ = json.Unmarshal([]byte(js), &p)
 		// Live shape: client_hints lines with an empty reels map, then one reel per line.
 		var lines []string
