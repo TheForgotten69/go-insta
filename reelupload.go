@@ -105,45 +105,107 @@ func (insta *Instagram) UploadReel(ctx context.Context, r io.Reader, opts ReelOp
 		return nil, err
 	}
 	secs := float64(info.durationMs) / 1000
-	payload := insta.configureBase(v.uploadID)
+	req := clipsConfigure{
+		configureBase: insta.configureBase(v.uploadID),
+		postFields:    x.fields(),
+		Length:        secs,
+		Clips:         []clipSegment{{Length: secs, SourceType: "4"}},
+		Extra:         sourceSize{Width: info.w, Height: info.h},
+		FilterType:    "0",
+	}
 	// Published synchronously: async_publish answers PENDING with an empty media.
-	delete(payload, "async_publish")
-	delete(payload, "publish_id")
-	payload["length"] = secs
-	payload["clips"] = []clipSegment{{Length: secs, SourceType: "4"}}
-	payload["extra"] = sourceSize{Width: info.w, Height: info.h}
-	payload["audio_muted"] = false
-	payload["poster_frame_index"] = 0
-	payload["filter_type"] = "0"
-	x.apply(payload)
-	if err := opts.apply(payload); err != nil {
+	req.AsyncPublish, req.PublishID = "", ""
+	if err := opts.apply(&req); err != nil {
 		return nil, err
 	}
-	return insta.configureReel(ctx, payload)
+	payload, err := withExtra(req, opts.Extra)
+	if err != nil {
+		return nil, err
+	}
+	return insta.configureReel(ctx, v.uploadID, payload)
 }
 
-func (o *ReelOptions) apply(payload map[string]any) error {
-	flag := func(key string, on bool) {
-		if on {
-			payload[key] = "1"
-		}
+// clipsConfigure is a configure_to_clips body.
+type clipsConfigure struct {
+	configureBase
+	postFields
+	reelFields
+	SceneCaptureType string        `json:"scene_capture_type"`
+	Length           float64       `json:"length"`
+	Clips            []clipSegment `json:"clips"`
+	Extra            sourceSize    `json:"extra"`
+	AudioMuted       bool          `json:"audio_muted"`
+	PosterFrameIndex int           `json:"poster_frame_index"`
+	FilterType       string        `json:"filter_type"`
+}
+
+// reelFields are the ReelOptions part of a configure_to_clips body.
+// is_auto_resharing_to_story comes from postFields.
+type reelFields struct {
+	ClipsSharePreviewToFeed           string       `json:"clips_share_preview_to_feed,omitempty"`
+	DisableComments                   string       `json:"disable_comments,omitempty"`
+	ThirdPartyDownloadsEnabled        string       `json:"third_party_downloads_enabled,omitempty"`
+	IsTemplateDisabled                string       `json:"is_template_disabled,omitempty"`
+	VideoSubtitlesEnabled             string       `json:"video_subtitles_enabled,omitempty"`
+	VideoSubtitlesTranslationsEnabled string       `json:"video_subtitles_translations_enabled,omitempty"`
+	IsGiftingEnabled                  string       `json:"is_gifting_enabled,omitempty"`
+	CoverFrameTimeMs                  string       `json:"cover_frame_time_ms,omitempty"`
+	TrialParams                       *trialParams `json:"trial_params,omitempty"`
+	ClipsVoiceTranslationMetadata     string       `json:"clips_voice_translation_metadata,omitempty"`
+	PublishMode                       string       `json:"publish_mode,omitempty"`
+	ContentSchedulingMetadata         string       `json:"content_scheduling_metadata,omitempty"`
+}
+
+// withExtra overlays extra on the JSON object of req. ReelOptions.Extra is the
+// one place a request leaves the typed structs, so it can set any field.
+func withExtra(req any, extra map[string]any) (any, error) {
+	if len(extra) == 0 {
+		return req, nil
 	}
-	flag("clips_share_preview_to_feed", !o.HideFromFeed)
-	flag("is_auto_resharing_to_story", o.ShareToStory)
-	flag("disable_comments", o.DisableComments)
-	flag("third_party_downloads_enabled", o.AllowDownloads)
-	flag("is_template_disabled", o.DisableTemplate)
-	flag("video_subtitles_enabled", o.Captions)
-	flag("video_subtitles_translations_enabled", o.TranslateCaption)
-	flag("is_gifting_enabled", o.Gifting)
+	b, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(b, &obj); err != nil {
+		return nil, err
+	}
+	for k, v := range extra {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("extra %s: %w", k, err)
+		}
+		obj[k] = raw
+	}
+	return obj, nil
+}
+
+func (o *ReelOptions) apply(req *clipsConfigure) error {
+	flag := func(on bool) string {
+		if on {
+			return "1"
+		}
+		return ""
+	}
+	f := &req.reelFields
+	f.ClipsSharePreviewToFeed = flag(!o.HideFromFeed)
+	f.DisableComments = flag(o.DisableComments)
+	f.ThirdPartyDownloadsEnabled = flag(o.AllowDownloads)
+	f.IsTemplateDisabled = flag(o.DisableTemplate)
+	f.VideoSubtitlesEnabled = flag(o.Captions)
+	f.VideoSubtitlesTranslationsEnabled = flag(o.TranslateCaption)
+	f.IsGiftingEnabled = flag(o.Gifting)
+	if o.ShareToStory {
+		req.IsAutoResharingToStory = "1"
+	}
 	if o.Audience != "" {
-		payload["audience"] = string(o.Audience)
+		req.Audience = string(o.Audience)
 	}
 	if o.CoverFrameMs > 0 {
-		payload["cover_frame_time_ms"] = strconv.Itoa(o.CoverFrameMs)
+		f.CoverFrameTimeMs = strconv.Itoa(o.CoverFrameMs)
 	}
 	if o.Trial != "" {
-		payload["trial_params"] = trialParams{GraduationStrategy: o.Trial}
+		f.TrialParams = &trialParams{GraduationStrategy: o.Trial}
 	}
 	if t := o.VoiceTranslation; t != nil {
 		meta, err := json.Marshal(voiceTranslationMeta{
@@ -153,18 +215,15 @@ func (o *ReelOptions) apply(payload map[string]any) error {
 		if err != nil {
 			return err
 		}
-		payload["clips_voice_translation_metadata"] = string(meta)
+		f.ClipsVoiceTranslationMetadata = string(meta)
 	}
 	if !o.ScheduledAt.IsZero() {
 		meta, err := json.Marshal(schedulingMeta{ScheduledPublishTime: o.ScheduledAt.Unix()})
 		if err != nil {
 			return err
 		}
-		payload["publish_mode"] = "scheduled"
-		payload["content_scheduling_metadata"] = string(meta)
-	}
-	for k, v := range o.Extra {
-		payload[k] = v
+		f.PublishMode = "scheduled"
+		f.ContentSchedulingMetadata = string(meta)
 	}
 	return nil
 }
@@ -208,7 +267,7 @@ var transcodeWait = 3 * time.Second
 
 const transcodeTries = 100 // 5 minutes; a 45 s Reel finished within 2
 
-func (insta *Instagram) configureReel(ctx context.Context, payload map[string]any) (*Item, error) {
+func (insta *Instagram) configureReel(ctx context.Context, uploadID string, payload any) (*Item, error) {
 	for range transcodeTries {
 		item, err := insta.configure(ctx, urlConfigureClips, payload)
 		if err == nil || !strings.Contains(err.Error(), "Transcode not finished") {
@@ -220,7 +279,7 @@ func (insta *Instagram) configureReel(ctx context.Context, payload map[string]an
 		case <-time.After(transcodeWait):
 		}
 	}
-	return nil, fmt.Errorf("reel %v: transcode not finished after %v", payload["upload_id"], transcodeWait*transcodeTries)
+	return nil, fmt.Errorf("reel %s: transcode not finished after %v", uploadID, transcodeWait*transcodeTries)
 }
 
 // videoRuploadParams is the X-Instagram-Rupload-Params of a Reel upload; every

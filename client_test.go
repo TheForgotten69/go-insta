@@ -52,7 +52,7 @@ func TestParseUserAgentRoundTrip(t *testing.T) {
 		t.Errorf("parsed %+v, %v", d, ok)
 	}
 	insta, _ := newReplay(t)
-	if m := insta.deviceInfo()["manufacturer"]; m != "Waydroid" {
+	if m := insta.deviceInfo().Manufacturer; m != "Waydroid" {
 		t.Errorf("manufacturer = %v", m)
 	}
 }
