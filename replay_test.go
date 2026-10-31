@@ -236,6 +236,8 @@ var skippedHeaders = map[string]bool{
 	"content-length": true, // set by the transport, not visible on the request headers
 	// Throttling telemetry on a few requests of the 2026-10-31 00:07 capture only.
 	"x-meta-tasos-td-rates": true, "x-meta-tasos-td-signal": true,
+	// DM requests carry the region from the xdt_igd_msg_region query, which the library does not run.
+	"x-msgr-region": true,
 	// A session token seen in the 2026-10-30 16:16 capture only; no response sets it.
 	"x-ig-session-visitation": true,
 }

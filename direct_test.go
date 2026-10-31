@@ -1,7 +1,6 @@
 package goinsta
 
 import (
-	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -17,9 +16,6 @@ func TestDirectInbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := fixture(t, "direct_inbox")
-	// x-msgr-region comes from the xdt_igd_msg_region GraphQL query, not fetched here.
-	f.ReqHeaders = maps.Clone(f.ReqHeaders)
-	delete(f.ReqHeaders, "x-msgr-region")
 	checkRequest(t, f, r.sent[0])
 	q := r.sent[0].req.URL.Query()
 	for _, k := range []string{"fetch_reason", "include_old_mrs", "limit", "thread_message_limit"} {
