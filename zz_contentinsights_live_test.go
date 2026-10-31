@@ -3,6 +3,7 @@
 package goinsta
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -66,5 +67,6 @@ func TestLiveContentInsights(t *testing.T) {
 	story := stories.Items[len(stories.Items)-1]
 	viewers := story.StoryViewers()
 	err = viewers.Next(ctx)
-	t.Logf("StoryViewers %s: err=%v n=%d more=%v", story.ID, err, len(viewers.Items), viewers.More())
+	users, _ := json.Marshal(viewers.Items)
+	t.Logf("StoryViewers %s: err=%v n=%d more=%v users=%.1500s (run with httplog for user_count)", story.ID, err, len(viewers.Items), viewers.More(), users)
 }
