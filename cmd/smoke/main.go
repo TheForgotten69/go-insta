@@ -419,9 +419,51 @@ func writePost(r *runner, insta *goinsta.Instagram) {
 			c, err := post.Comments().Collect(ctx, 0)
 			return fmt.Sprintf("%d comments", len(c)), err
 		})
+		r.step("comment.Pin + Unpin", func() (string, error) {
+			if err := comment.Pin(ctx); err != nil {
+				return "", err
+			}
+			return "", comment.Unpin(ctx)
+		})
 		r.step("comment.Delete", func() (string, error) { return "", comment.Delete(ctx) })
 	}
+	r.step("item.Edit (caption)", func() (string, error) {
+		if err := post.Edit(ctx, goinsta.MediaEdit{Caption: "go-insta smoke edited"}); err != nil {
+			return "", err
+		}
+		return expect(post.Caption.Text == "go-insta smoke edited", "caption=%q", post.Caption.Text)
+	})
+	r.step("item.DisableComments + EnableComments", func() (string, error) {
+		if err := post.DisableComments(ctx); err != nil {
+			return "", err
+		}
+		return "", post.EnableComments(ctx)
+	})
+	r.step("item.SetCountsHidden", func() (string, error) {
+		if err := post.SetCountsHidden(ctx, true, true); err != nil {
+			return "", err
+		}
+		// The share flag lands a moment after the like flag.
+		var it *goinsta.Item
+		for range 5 {
+			var err error
+			if it, err = insta.MediaInfo(ctx, post.ID); err != nil {
+				return "", err
+			}
+			if it.LikeViewCountDisabled && it.ShareCountDisabled {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+		return expect(it.LikeViewCountDisabled && it.ShareCountDisabled, "likes hidden=%v shares hidden=%v",
+			it.LikeViewCountDisabled, it.ShareCountDisabled)
+	})
+	r.step("item.FetchLikers", func() (string, error) {
+		l, err := post.FetchLikers(ctx)
+		return fmt.Sprintf("%d likers", len(l)), err
+	})
 	r.step("item.Archive", func() (string, error) { return "", post.Archive(ctx) })
+	r.step("item.Unarchive", func() (string, error) { return "", post.Unarchive(ctx) })
 }
 
 func writeAlbum(r *runner, insta *goinsta.Instagram, dir string, size int) {
@@ -551,7 +593,16 @@ func writeReel(r *runner, insta *goinsta.Instagram, file string, keep bool) {
 		return expect(it.Code != "" && it.ProductType == "clips" && it.VideoDuration > 0,
 			"%s code=%s product=%s duration=%.2fs", it.ID, it.Code, it.ProductType, it.VideoDuration)
 	})
-	if it != nil && !keep {
+	if it == nil {
+		return
+	}
+	r.step("item.SetRemixAllowed + SetDownloads", func() (string, error) {
+		if err := it.SetRemixAllowed(ctx, false); err != nil {
+			return "", err
+		}
+		return "", it.SetDownloads(ctx, true)
+	})
+	if !keep {
 		r.step("item.Delete (reel)", func() (string, error) { return it.ID, it.Delete(ctx) })
 	}
 }

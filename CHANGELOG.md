@@ -3,6 +3,22 @@
 All notable changes to this project are documented here. The project uses
 [Semantic Versioning](https://semver.org/) (pre-1.0: a minor bump may break the API).
 
+## [Unreleased]
+
+### Features
+
+- Post management, from the app's request builders and verified live:
+  `Item.Edit(ctx, MediaEdit{Caption, ClearLocation, RemoveChildren, ChildOrder})`,
+  `Item.DisableComments` / `EnableComments`, `Item.SetCountsHidden`, `Item.Unarchive`,
+  `Comment.Pin` / `Unpin`, `Item.FetchLikers`, `Instagram.MediaInfo`, and for Reels
+  `Item.SetRemixAllowed` and `Item.SetDownloads`.
+
+### Enhancements
+
+- Every request parameter is a named struct instead of a map; only HTTP headers,
+  `ReelOptions.Extra` and maps keyed by dynamic ids remain maps. The wire format is
+  unchanged.
+
 ## [0.6.0] - 2026-10-31
 
 ### Features

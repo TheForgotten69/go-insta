@@ -44,6 +44,7 @@ item, err = insta.UploadPhoto(ctx, img, goinsta.PostOptions{
 	ShareToThreads: true, HideLikeCounts: true, HideShareCounts: true, ShareToStory: true,
 })
 paths, err := item.DownloadTo(ctx, "out/")
+err = item.Edit(ctx, goinsta.MediaEdit{Caption: "fixed typo"}) // also DisableComments, SetCountsHidden, Unarchive…
 
 reel, err := insta.UploadReel(ctx, mp4, goinsta.ReelOptions{ // H.264/AAC MP4
 	PostOptions: goinsta.PostOptions{Caption: "hi", ShareToStory: true},
