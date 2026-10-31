@@ -37,6 +37,20 @@ The `just` recipes below live in `~/Documents/projects/research/instagram/justfi
 Done 2026-10-31 (live): highlight create, add, edit (rename, cover, add/remove), archive,
 unarchive, delete; tray paging through `paginated_highlights_tray`.
 
+### Flagged, not built (each is a jadx + live-test job, see `docs/reverse-engineering.md`)
+
+- **Upload metadata**: `PostOptions`/`ReelOptions` take no location, people tags or
+  collaborators. `SearchLocations` exists; the configure builders carry `location`,
+  `usertags`, `coauthor_invites` (decompiled in `EditMediaInfoFragment`/`C0VEZ`). **[code]**
+- **Comment replies**: reading replies works; posting one (`replied_to_comment_id`) does not.
+  **[code]**
+- **Hashtags**: `tags/search/` is captured; hashtag search and feeds are not built. **[code]**
+- **Story stickers**: poll votes, question answers, quiz and countdown endpoints
+  (`media/%s/%s/story_poll_vote/`, `story_question_response/`, …). **[code]**
+- **DMs send and mark seen**: built on the legacy REST endpoints (the app uses MQTT);
+  unverified until a second account receives a test message. **[you]**
+- **Live video**: needs an RTMP stream; out of scope so far.
+
 ## Login
 
 3. **Checkpoints (`checkpoint.ufac.*`)**: captcha, contact-point code, selfie flows are in the
