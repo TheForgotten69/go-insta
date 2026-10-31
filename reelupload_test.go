@@ -7,6 +7,7 @@ import (
 	"errors"
 	"maps"
 	"path"
+	"reflect"
 	"slices"
 	"strconv"
 	"testing"
@@ -136,6 +137,28 @@ func TestUploadReel(t *testing.T) {
 	}
 }
 
+// reelBody is the JSON object UploadReel sends for o, on a base whose audience is "default".
+func reelBody(t *testing.T, o ReelOptions) map[string]any {
+	t.Helper()
+	req := clipsConfigure{configureBase: configureBase{Audience: "default"}}
+	if err := o.apply(&req); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := withExtra(req, o.Extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(b, &obj); err != nil {
+		t.Fatal(err)
+	}
+	return obj
+}
+
 func TestReelOptions(t *testing.T) {
 	at := time.Date(2026, 11, 2, 18, 0, 0, 0, time.UTC)
 	o := ReelOptions{
@@ -148,10 +171,7 @@ func TestReelOptions(t *testing.T) {
 		ScheduledAt:      at,
 		Extra:            map[string]any{"disable_comments": "0", "music_start_time_ms": "0"},
 	}
-	p := map[string]any{"audience": "default"}
-	if err := o.apply(p); err != nil {
-		t.Fatal(err)
-	}
+	p := reelBody(t, o)
 	for k, want := range map[string]any{
 		"is_auto_resharing_to_story": "1", "disable_comments": "0", "third_party_downloads_enabled": "1",
 		"is_template_disabled": "1", "video_subtitles_enabled": "1", "video_subtitles_translations_enabled": "1",
@@ -168,13 +188,14 @@ func TestReelOptions(t *testing.T) {
 	if _, shared := p["clips_share_preview_to_feed"]; shared {
 		t.Error("HideFromFeed still sent clips_share_preview_to_feed")
 	}
-	if tp, _ := p["trial_params"].(trialParams); tp.GraduationStrategy != TrialPerformance {
+	if tp, _ := p["trial_params"].(map[string]any); tp["graduation_strategy"] != string(TrialPerformance) {
 		t.Errorf("trial_params = %v", p["trial_params"])
 	}
 
-	zero := map[string]any{}
-	if err := (&ReelOptions{}).apply(zero); err != nil || len(zero) != 1 || zero["clips_share_preview_to_feed"] != "1" {
-		t.Errorf("zero options sent %v (%v), want only clips_share_preview_to_feed", zero, err)
+	zero, base := reelBody(t, ReelOptions{}), reelBody(t, ReelOptions{HideFromFeed: true})
+	delete(zero, "clips_share_preview_to_feed")
+	if !reflect.DeepEqual(zero, base) || reelBody(t, ReelOptions{})["clips_share_preview_to_feed"] != "1" {
+		t.Errorf("zero options sent %v beyond clips_share_preview_to_feed, want nothing", zero)
 	}
 	insta, _ := newReplay(t)
 	if _, err := insta.UploadReel(t.Context(), bytes.NewReader(testMP4(1080, 1920, 6000, false)),

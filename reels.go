@@ -11,21 +11,24 @@ func (insta *Instagram) Reels() *Pager[*Item] {
 	var maxID string
 	var pos int
 	return newPager(func(ctx context.Context) ([]*Item, string, error) {
-		q := map[string]string{
-			"_uuid":                         insta.uuid,
-			"container_module":              "clips_viewer_clips_tab",
-			"reason":                        "navigate",
-			"seen_reels":                    "[]",
-			"should_refetch_chaining_media": "false",
-			"viewer_session_id":             sessionID,
-			"client_view_state_media_list":  "[]",
-			"session_info":                  `{"session_id":"` + sessionID + `","media_info":{}}`,
+		req := clipsDiscoverRequest{
+			UUID:                       insta.uuid,
+			ContainerModule:            "clips_viewer_clips_tab",
+			Reason:                     "navigate",
+			SeenReels:                  "[]",
+			ShouldRefetchChainingMedia: "false",
+			ViewerSessionID:            sessionID,
+			ClientViewStateMediaList:   "[]",
+			SessionInfo:                `{"session_id":"` + sessionID + `","media_info":{}}`,
 		}
 		friendly := "IgApi: clips/discover/stream/"
 		if maxID != "" {
-			q["max_id"] = maxID
-			q["reason"] = "tailload"
+			req.MaxID, req.Reason = maxID, "tailload"
 			friendly += "_tail"
+		}
+		q, err := formOf(req)
+		if err != nil {
+			return nil, "", err
 		}
 		// Lines hold different reels; the last one carries the cursor.
 		var resp struct {
@@ -39,7 +42,7 @@ func (insta *Instagram) Reels() *Pager[*Item] {
 		}
 		var items []*Item
 		seen := map[string]bool{}
-		err := insta.callLines(ctx, &reqOptions{
+		err = insta.callLines(ctx, &reqOptions{
 			Endpoint:     urlClipsDiscover,
 			FriendlyName: friendly,
 			IsPost:       true,
@@ -74,6 +77,24 @@ func (insta *Instagram) Reels() *Pager[*Item] {
 	})
 }
 
+type clipsDiscoverRequest struct {
+	UUID                       string `json:"_uuid"`
+	ContainerModule            string `json:"container_module"`
+	Reason                     string `json:"reason"`
+	SeenReels                  string `json:"seen_reels"`
+	ShouldRefetchChainingMedia string `json:"should_refetch_chaining_media"`
+	ViewerSessionID            string `json:"viewer_session_id"`
+	ClientViewStateMediaList   string `json:"client_view_state_media_list"`
+	SessionInfo                string `json:"session_info"`
+	MaxID                      string `json:"max_id,omitempty"`
+}
+
+type clipsSeenRequest struct {
+	sessionIDs
+	Impressions      string `json:"impressions"`
+	BlendImpressions string `json:"blend_impressions"`
+}
+
 func (insta *Instagram) MarkReelsSeen(ctx context.Context, items ...*Item) error {
 	ids := make([]string, len(items))
 	for i, it := range items {
@@ -83,11 +104,10 @@ func (insta *Instagram) MarkReelsSeen(ctx context.Context, items ...*Item) error
 	if err != nil {
 		return err
 	}
-	q, err := signedBody(map[string]string{
-		"_uid":              strconv.FormatInt(insta.userID(), 10),
-		"_uuid":             insta.uuid,
-		"impressions":       string(impressions),
-		"blend_impressions": "[]",
+	q, err := signedBody(clipsSeenRequest{
+		sessionIDs:       insta.sessionIDs(),
+		Impressions:      string(impressions),
+		BlendImpressions: "[]",
 	})
 	if err != nil {
 		return err
