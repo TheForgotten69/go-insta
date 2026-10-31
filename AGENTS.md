@@ -24,3 +24,4 @@ decompiled app and proven against the live API on a test account.
   give each new call a step there.
 - Commit and push to `main`; record changes under `## [Unreleased]` in
   `CHANGELOG.md`; tag a release only when the user asks for it.
+- Refrain on useless comments, the goal is having clean code that adheres to DRY, YAGNI, SOLID and other conventions of golang, so comments should be there only for specifics.
