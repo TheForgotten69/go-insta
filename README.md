@@ -52,7 +52,7 @@ reel, err := insta.UploadReel(ctx, mp4, goinsta.ReelOptions{ // H.264/AAC MP4
 	VoiceTranslation: &goinsta.VoiceTranslation{InputLanguage: "fra", Languages: []string{"eng", "spa"}},
 }) // every field: docs/reel-fields.md
 
-story, err := insta.UploadStory(ctx, img)
+story, err := insta.UploadStory(ctx, img, goinsta.StoryOptions{LinkPost: item})
 hl, err := insta.CreateHighlight(ctx, "Trips", story) // first item is the cover
 err = hl.AddItems(ctx, otherStory)
 err = hl.Edit(ctx, goinsta.HighlightEdit{Title: "Trips 2026", Cover: otherStory, Remove: []*goinsta.Item{story}})

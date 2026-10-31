@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The project uses
 
 ## [Unreleased]
 
+### Breaking
+
+- `UploadStory` takes a `StoryOptions` argument; pass `StoryOptions{}` for the old behavior.
+
+### Features
+
+- `StoryOptions.LinkPost` puts a tappable post sticker over the story, so the story
+  (and a highlight made from it) opens the post. Verified live; Instagram stores the
+  sticker at most half the frame wide and tall, centered, and keeps one post sticker per story.
+
 ## [0.7.0] - 2026-10-31
 
 ### Features

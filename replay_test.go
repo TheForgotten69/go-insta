@@ -1031,7 +1031,7 @@ func TestUploadAlbum(t *testing.T) {
 
 func TestUploadStory(t *testing.T) {
 	insta, r := newReplay(t, "rupload_story", "configure_story")
-	if _, err := insta.UploadStory(t.Context(), testJPEG(t, 1080, 1920)); err != nil {
+	if _, err := insta.UploadStory(t.Context(), testJPEG(t, 1080, 1920), StoryOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "rupload_story"), r.sent[0])
@@ -1041,6 +1041,45 @@ func TestUploadStory(t *testing.T) {
 		f.ReqHeaders[k] = fixture(t, "configure").ReqHeaders[k]
 	}
 	checkRequest(t, f, r.sent[1])
+}
+
+func TestUploadStoryLinkPost(t *testing.T) {
+	insta, r := newReplay(t, "rupload_story", "configure_story")
+	post := &Item{Pk: 4020371272796136701, User: User{ID: 42865264907}}
+	if _, err := insta.UploadStory(t.Context(), testJPEG(t, 1080, 1920), StoryOptions{LinkPost: post}); err != nil {
+		t.Fatal(err)
+	}
+	f := fixture(t, "configure_story")
+	for _, k := range []string{"priority", "x-fb-request-analytics-tags"} {
+		f.ReqHeaders[k] = fixture(t, "configure").ReqHeaders[k]
+	}
+	checkRequest(t, f, r.sent[1], "tap_models", "reshared_media_id")
+	got := r.sent[1].payload
+	if got["reshared_media_id"] != "4020371272796136701" || got["source_type"] != "4" {
+		t.Errorf("reshared_media_id = %v, source_type = %v", got["reshared_media_id"], got["source_type"])
+	}
+	var tap []map[string]any
+	if err := json.Unmarshal([]byte(got["tap_models"].(string)), &tap); err != nil || len(tap) != 1 {
+		t.Fatalf("tap_models = %v (%v)", got["tap_models"], err)
+	}
+	for k, want := range map[string]any{
+		"x": 0.5, "y": 0.5, "width": 1.0, "height": 1.0, "type": "feed_media",
+		"media_id": "4020371272796136701", "media_owner_id": "42865264907", "is_sticker": true,
+	} {
+		if tap[0][k] != want {
+			t.Errorf("tap %s = %v, want %v", k, tap[0][k], want)
+		}
+	}
+}
+
+func TestUploadStoryLinkPostNoPk(t *testing.T) {
+	insta, r := newReplay(t)
+	if _, err := insta.UploadStory(t.Context(), testJPEG(t, 1080, 1920), StoryOptions{LinkPost: &Item{}}); err == nil {
+		t.Fatal("want an error for a post without pk")
+	}
+	if len(r.sent) != 0 {
+		t.Errorf("sent %d requests before failing", len(r.sent))
+	}
 }
 
 func TestUploadPhotoThreadsStory(t *testing.T) {

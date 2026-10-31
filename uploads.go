@@ -527,16 +527,30 @@ func (j jsonText[T]) MarshalJSON() ([]byte, error) {
 	return json.Marshal(string(b))
 }
 
+type StoryOptions struct {
+	// LinkPost is opened by tapping the story. Instagram caps the tap area
+	// at the centered half of the frame in each direction.
+	LinkPost *Item
+}
+
 // UploadStory posts a JPEG or WebP image to the story.
-func (insta *Instagram) UploadStory(ctx context.Context, r io.Reader) (*Item, error) {
+func (insta *Instagram) UploadStory(ctx context.Context, r io.Reader, opts StoryOptions) (*Item, error) {
 	p, err := readPhoto(r)
 	if err != nil {
 		return nil, err
+	}
+	if opts.LinkPost != nil && opts.LinkPost.Pk == 0 {
+		return nil, errNoPostPk
 	}
 	if err := insta.uploadPhoto(ctx, p, "stories", ""); err != nil {
 		return nil, err
 	}
 	req := insta.storyBase(p)
+	if opts.LinkPost != nil {
+		if err := insta.addPostSticker(&req, opts.LinkPost, 1, 1); err != nil {
+			return nil, err
+		}
+	}
 	req.CaptureType = "normal"
 	req.CompositionID = generateUUID()
 	req.MediaTransformationInfo = fmt.Sprintf(
@@ -609,31 +623,48 @@ type postSticker struct {
 	TapStateString string  `json:"tap_state_str_id"`
 }
 
-func (insta *Instagram) reshareToStory(ctx context.Context, post *Item, card *storyCard) error {
-	p := card.photo
-	if err := insta.uploadPhoto(ctx, p, "stories", ""); err != nil {
-		return err
+var errNoPostPk = errors.New("post sticker: post has no pk")
+
+// w and h are fractions of the frame.
+func (insta *Instagram) addPostSticker(req *storyConfigure, post *Item, w, h float64) error {
+	if post.Pk == 0 {
+		return errNoPostPk
 	}
 	pk := strconv.FormatInt(int64(post.Pk), 10)
-	// The app sent product_type carousel_container for a single photo too.
+	owner := int64(post.User.ID)
+	if owner == 0 {
+		owner = insta.userID()
+	}
+	// The app sends product_type carousel_container for every post sticker.
 	tap, err := json.Marshal([]postSticker{{
-		X: 0.5, Y: 0.5, Width: card.w, Height: card.h,
-		Type: "feed_media", MediaID: pk, MediaOwnerID: strconv.FormatInt(insta.userID(), 10),
+		X: 0.5, Y: 0.5, Width: w, Height: h,
+		Type: "feed_media", MediaID: pk, MediaOwnerID: strconv.FormatInt(owner, 10),
 		ProductType: "carousel_container", IsSticker: true, TapStateString: "feed_post_sticker_square",
 	}})
 	if err != nil {
 		return err
 	}
+	req.ResharedMediaID = pk
+	req.TapModels = string(tap)
+	return nil
+}
+
+func (insta *Instagram) reshareToStory(ctx context.Context, post *Item, card *storyCard) error {
+	p := card.photo
+	if err := insta.uploadPhoto(ctx, p, "stories", ""); err != nil {
+		return err
+	}
 	req := insta.storyBase(p)
+	if err := insta.addPostSticker(&req, post, card.w, card.h); err != nil {
+		return err
+	}
 	req.CaptureType = "unknown"
 	req.CameraSessionID = ""
 	req.SourceType = "feed_reshare"
-	req.ResharedMediaID = pk
 	req.IsAutoResharingToStory = "1"
 	req.ImportedTakenAt = req.ClientSharedAt
 	req.HasCameraMetadata = "0"
 	req.HasOriginalSound = "1"
-	req.TapModels = string(tap)
-	_, err = insta.configure(ctx, urlConfigureStory, req)
+	_, err := insta.configure(ctx, urlConfigureStory, req)
 	return err
 }

@@ -599,6 +599,23 @@ func writePost(r *runner, insta *goinsta.Instagram) {
 		b, err := post.Download(ctx)
 		return fmt.Sprintf("%d bytes", len(b)), err
 	})
+	r.step("UploadStory (linked to post)", func() (string, error) {
+		story, err := insta.UploadStory(ctx, testJPEG(120), goinsta.StoryOptions{LinkPost: post})
+		if err != nil {
+			return "", err
+		}
+		linked := len(story.StoryFeedMedia) == 1
+		if linked {
+			m, _ := story.StoryFeedMedia[0].(map[string]any)
+			linked = m["media_id"] == fmt.Sprint(int64(post.Pk))
+		}
+		summary := fmt.Sprintf("%s, %d post stickers", story.ID, len(story.StoryFeedMedia))
+		var err2 error
+		if !linked {
+			err2 = errors.New("story does not link the post: " + summary)
+		}
+		return summary, errors.Join(err2, story.Delete(ctx))
+	})
 	r.step("item.Pin", func() (string, error) { return "", post.Pin(ctx) })
 	r.step("item.AddNote", func() (string, error) {
 		n, err := post.AddNote(ctx, "smoke")
@@ -704,7 +721,7 @@ func writeStory(r *runner, insta *goinsta.Instagram) {
 	var story *goinsta.Item
 	r.step("UploadStory", func() (string, error) {
 		var err error
-		story, err = insta.UploadStory(ctx, testJPEG(160))
+		story, err = insta.UploadStory(ctx, testJPEG(160), goinsta.StoryOptions{})
 		if err != nil {
 			return "", err
 		}
@@ -832,7 +849,7 @@ func writeHighlight(r *runner, insta *goinsta.Instagram, keep bool) {
 	var stories []*goinsta.Item
 	for _, hue := range []uint8{40, 200} {
 		r.step("UploadStory (highlight)", func() (string, error) {
-			s, err := insta.UploadStory(ctx, testJPEG(hue))
+			s, err := insta.UploadStory(ctx, testJPEG(hue), goinsta.StoryOptions{})
 			if err != nil {
 				return "", err
 			}
