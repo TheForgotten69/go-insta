@@ -6,18 +6,6 @@ import (
 	"time"
 )
 
-const (
-	docSeriesInsightsOverview   = "383515635314126103399555900562"
-	docSeriesInsightsEngagement = "281083989014079368110826164376"
-	docSeriesInsightsAudience   = "386340097017018189326628161392"
-	docFanClubInsights          = "147178694610827473488858200058"
-
-	rootLinkedMediaPlaylist = "fetch__XIGLinkedMediaPlaylist"
-	rootFanClubInsights     = "node"
-
-	urlUserPayInsights = "creators/user_pay/insights/"
-)
-
 // CreatorInsights is the response of a creator analytics query. The app maps
 // these responses by hashed field ids, so the field names are not known yet;
 // Raw holds the whole root object.

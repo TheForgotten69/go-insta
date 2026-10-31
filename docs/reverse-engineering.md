@@ -29,6 +29,10 @@ rg -lF 'media/%s/edit_media/' out13/sources                                     
 $R/jadx/resolve.py out13/sources/X/C0VEZ.java                                            # with keys resolved
 ```
 
+A string that `strings` finds in a dex but `rg` does not find in its sources sits in a
+method jadx dropped: decompile that dex again with `-m fallback` (bytecode-like, but
+complete).
+
 `resolve.py` replaces the obfuscated string-table lookups (`0000.A00(1575)`) with their
 strings; its header says how to add a table it does not know yet (an unresolved lookup
 prints as `?<table>/<n>`).
@@ -36,7 +40,10 @@ prints as `?<table>/<n>`).
 **GraphQL:** `$R/jadx/ig4a-instagram-schema_client_persist_ids.json` maps every operation
 name to its doc id; a `schema` of `instagram` means `graphql_www`, `distillery` means
 `graphql/query`. The variables come from the query's data-source class (search the
-operation name in the decompiled sources).
+operation name in the decompiled sources): `A05(key, s)` sets a string, `A03(key, b)`
+a bool, `A04(key, n)` an int, and the call `06of.A03(vars, "<Operation>", "<root>", …)`
+names the root field. Instagram answers `missing_required_variable_value` (1675012)
+until every variable the builder sets is sent.
 
 Done when you have every key the builder sets, each with its setter (table below), and
 the conditions under which the app sends it.

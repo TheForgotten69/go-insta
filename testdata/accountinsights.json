@@ -1,0 +1,530 @@
+{
+ "AccountInsightsHomeQuery": {
+  "data": {
+   "__typename": "Query",
+   "aiGuidance": null,
+   "ig_account_insights": {
+    "cx_insights_enabled": false,
+    "has_account_status_warnings": false,
+    "is_cx_user": false,
+    "next_steps_tips": {
+     "component": {
+      "bundle": {
+       "bloks_bundle_tree": "{\"tree\":1}"
+      }
+     }
+    },
+    "summary_unit": {
+     "layout": "HERO_PLUS_TWO",
+     "tiles": [
+      {
+       "delta": {
+        "sentiment": "POSITIVE",
+        "value": "+100% vs. Sep 29"
+       },
+       "id": "views",
+       "metric": {
+        "formatted_value": "33",
+        "value": 33
+       },
+       "time_series": {
+        "data_points": [
+         {
+          "timestamp": 1790751600,
+          "value": 0
+         },
+         {
+          "timestamp": 1790838000,
+          "value": 0
+         }
+        ]
+       },
+       "title": "Views"
+      },
+      {
+       "delta": null,
+       "id": "followers",
+       "metric": {
+        "formatted_value": "3",
+        "value": 3
+       },
+       "time_series": null,
+       "title": "Followers"
+      }
+     ]
+    },
+    "tools": [
+     {
+      "destination": "instagram://run_bloks_action/?bloks_app_id=com.bloks.www.ig.pro_dash.open_account_status.async_action&params=%7B%22params%22%3A%22%7B%5C%22server_params%5C%22%3A%7B%7D%2C%5C%22client_input_params%5C%22%3A%7B%7D%7D%22%7D",
+      "destination_type": "DEEPLINK",
+      "id": "ACCOUNT_STATUS",
+      "impression_deeplink": null,
+      "logging_component_name": "account_status_tool",
+      "title": "Account Status"
+     },
+     {
+      "destination": "instagram://run_bloks_action/?bloks_app_id=com.bloks.www.ig.boost.open_ad_tools.async_action",
+      "destination_type": "DEEPLINK",
+      "id": "AD_TOOLS",
+      "impression_deeplink": null,
+      "logging_component_name": "promotions_tool",
+      "title": "Ad tools"
+     }
+    ]
+   },
+   "metaOneEligibility": {
+    "eligibility_status": "INELIGIBLE",
+    "show_upsell_animation": false
+   },
+   "strong_id__": null
+  }
+ },
+ "AccountInsightsOverviewQuery": {
+  "data": {
+   "__typename": "Query",
+   "ig_account_insights": {
+    "account_views_by_content_type": {
+     "entries": [
+      {
+       "content_type": "post",
+       "facebook_count": null,
+       "follower_count": 5,
+       "non_follower_count": 22,
+       "total": 27
+      },
+      {
+       "content_type": "story",
+       "facebook_count": null,
+       "follower_count": 0,
+       "non_follower_count": 6,
+       "total": 6
+      }
+     ],
+     "is_ccp_aggregated": false,
+     "total": 33
+    },
+    "account_views_count": {
+     "follow_type_breakdown": {
+      "follower": {
+       "value": 0.152
+      },
+      "non_follower": {
+       "value": 0.848
+      }
+     },
+     "is_ccp_aggregated": false,
+     "total": {
+      "benchmark": {
+       "comparison": "HIGHER",
+       "display_string": "+100% vs. Sep 29",
+       "sentiment": "POSITIVE",
+       "value": 0
+      },
+      "format": "COUNT",
+      "formatted_value": "33",
+      "id": "views_count",
+      "label": "Views",
+      "value": 33
+     }
+    },
+    "bio_link_taps": {
+     "benchmark": {
+      "comparison": "TYPICAL",
+      "display_string": "0%",
+      "sentiment": "NEUTRAL",
+      "value": 0
+     },
+     "value": 0
+    },
+    "business_address_taps": {
+     "value": 0
+    },
+    "follower_growth": null,
+    "follower_views": {
+     "benchmark": null,
+     "format": "COUNT",
+     "formatted_value": "5",
+     "id": "follower_views",
+     "label": "Follower views",
+     "value": 5
+    },
+    "follower_views_over_time": {
+     "data_points": [
+      {
+       "timestamp": 1790751600,
+       "value": 0
+      },
+      {
+       "timestamp": 1790838000,
+       "value": 0
+      }
+     ]
+    },
+    "interactions_by_content_type": {
+     "sub_breakdowns": [
+      {
+       "entries": [
+        {
+         "content_type": "post",
+         "value": 4
+        },
+        {
+         "content_type": "story",
+         "value": 4
+        }
+       ],
+       "interaction_type": "likes",
+       "total": 8
+      },
+      {
+       "entries": [
+        {
+         "content_type": "post",
+         "value": 1
+        },
+        {
+         "content_type": "story",
+         "value": 0
+        }
+       ],
+       "interaction_type": "comments",
+       "total": 1
+      }
+     ],
+     "total_breakdown": {
+      "entries": [
+       {
+        "content_type": "post",
+        "follower_count": 0,
+        "non_follower_count": 17,
+        "total": 17
+       },
+       {
+        "content_type": "story",
+        "follower_count": 0,
+        "non_follower_count": 4,
+        "total": 4
+       }
+      ],
+      "total": 21
+     }
+    },
+    "interactions_count": {
+     "follower": {
+      "value": 0
+     },
+     "non_follower": {
+      "value": 1
+     },
+     "total": {
+      "benchmark": null,
+      "format": "COUNT",
+      "formatted_value": "21",
+      "id": "interactions_count",
+      "label": "Interactions",
+      "value": 21
+     }
+    },
+    "link_page_views": {
+     "benchmark": null,
+     "value": null
+    },
+    "non_follower_views": {
+     "benchmark": null,
+     "format": "COUNT",
+     "formatted_value": "28",
+     "id": "non_follower_views",
+     "label": "Non-follower views",
+     "value": 28
+    },
+    "non_follower_views_over_time": {
+     "data_points": [
+      {
+       "timestamp": 1790751600,
+       "value": 0
+      },
+      {
+       "timestamp": 1790838000,
+       "value": 0
+      }
+     ]
+    },
+    "overview_tip": null,
+    "profile_visits": {
+     "value": 8
+    },
+    "viewers_or_reach": {
+     "benchmark": {
+      "comparison": "HIGHER",
+      "display_string": "+100% vs. Sep 29",
+      "sentiment": "POSITIVE",
+      "value": 0
+     },
+     "format": "COUNT",
+     "formatted_value": "10",
+     "id": "viewers",
+     "label": "Viewers",
+     "value": 10
+    },
+    "viewers_over_time": {
+     "data_points": [
+      {
+       "timestamp": 1790751600,
+       "value": 0
+      },
+      {
+       "timestamp": 1790838000,
+       "value": 0
+      }
+     ]
+    },
+    "views_over_time": {
+     "data_points": [
+      {
+       "timestamp": 1790751600,
+       "value": 0
+      },
+      {
+       "timestamp": 1790838000,
+       "value": 0
+      }
+     ]
+    }
+   },
+   "strong_id__": null
+  }
+ },
+ "AccountInsightsAudienceQuery": {
+  "data": {
+   "__typename": "Query",
+   "ig_account_insights": {
+    "active_followers_over_time": {
+     "data_points": [
+      {
+       "timestamp": 1793084400,
+       "value": 0
+      },
+      {
+       "timestamp": 1793170800,
+       "value": 2
+      }
+     ]
+    },
+    "active_times": {
+     "applied_timezone": null,
+     "is_localized_active_times_enabled": true,
+     "slots": [
+      {
+       "day": 0,
+       "hour": 0,
+       "value": 0
+      },
+      {
+       "day": 0,
+       "hour": 3,
+       "value": 0
+      }
+     ],
+     "top_slots": []
+    },
+    "active_times_tip": null,
+    "age_demographics": {
+     "entries": [
+      {
+       "age_range": "13-17",
+       "men_percentage": 0,
+       "other_percentage": 0,
+       "percentage": 0,
+       "women_percentage": 0
+      },
+      {
+       "age_range": "18-24",
+       "men_percentage": 0,
+       "other_percentage": 0,
+       "percentage": 0,
+       "women_percentage": 0
+      }
+     ],
+     "show_tooltips": true
+    },
+    "audience_tip": null,
+    "follower_count": {
+     "benchmark": null,
+     "format": "COUNT",
+     "formatted_value": "3",
+     "id": "follower_count",
+     "label": "",
+     "value": 3
+    },
+    "follower_growth": null,
+    "follower_growth_delta": {
+     "sentiment": "NEUTRAL",
+     "value": "--"
+    },
+    "gender_demographics": [],
+    "net_followers_over_time": {
+     "follows": [],
+     "overall": [],
+     "unfollows": []
+    },
+    "top_cities": [
+     {
+      "display_value": "--",
+      "id": "",
+      "name": "--",
+      "percentage": 0,
+      "segments": []
+     },
+     {
+      "display_value": "--",
+      "id": "",
+      "name": "--",
+      "percentage": 0,
+      "segments": []
+     }
+    ],
+    "top_countries": [
+     {
+      "display_value": "--",
+      "id": "",
+      "name": "--",
+      "percentage": 0,
+      "segments": []
+     },
+     {
+      "display_value": "--",
+      "id": "",
+      "name": "--",
+      "percentage": 0,
+      "segments": []
+     }
+    ],
+    "top_languages": []
+   },
+   "strong_id__": null
+  }
+ },
+ "AccountInsightsContentQuery": {
+  "data": {
+   "__typename": "Query",
+   "strong_id__": null,
+   "ig_account_insights": {
+    "content_tip": null,
+    "your_content": {
+     "items": [
+      {
+       "thumbnail": {
+        "media_id": "4017451613201790201",
+        "media_url": "https://example/media.jpg",
+        "media_type": "post",
+        "icon": "NONE",
+        "creation_time": 1793137574,
+        "caption_text": "prompt",
+        "is_promoted": false,
+        "is_trial_reel": false,
+        "is_collab": false,
+        "collab_usernames": []
+       },
+       "metrics": [
+        {
+         "metric": "likes",
+         "value": 0
+        },
+        {
+         "metric": "comments",
+         "value": 1
+        },
+        {
+         "metric": "reposts",
+         "value": 0
+        },
+        {
+         "metric": "shares",
+         "value": 0
+        },
+        {
+         "metric": "views",
+         "value": 8
+        },
+        {
+         "metric": "replies",
+         "value": null
+        }
+       ]
+      },
+      {
+       "thumbnail": {
+        "media_id": "4017339574726819587",
+        "media_url": "https://example/media.jpg",
+        "media_type": "story",
+        "icon": "STORY",
+        "creation_time": 1793124218,
+        "caption_text": "",
+        "is_promoted": false,
+        "is_trial_reel": false,
+        "is_collab": false,
+        "collab_usernames": []
+       },
+       "metrics": [
+        {
+         "metric": "likes",
+         "value": 0
+        },
+        {
+         "metric": "comments",
+         "value": null
+        },
+        {
+         "metric": "reposts",
+         "value": null
+        },
+        {
+         "metric": "shares",
+         "value": 0
+        },
+        {
+         "metric": "views",
+         "value": 6
+        },
+        {
+         "metric": "replies",
+         "value": 0
+        }
+       ]
+      }
+     ],
+     "page_info": {
+      "has_next_page": false,
+      "end_cursor": null
+     }
+    }
+   }
+  }
+ },
+ "AccountInsightsMediaComponentQuery": {
+  "data": {
+   "__typename": "Query",
+   "strong_id__": null,
+   "ig_account_insights": {
+    "bloks_carousel_media_insights_component": {
+     "component": {
+      "bundle": {
+       "bloks_bundle_tree": "{\"tree\":1}"
+      }
+     }
+    }
+   }
+  }
+ },
+ "AccountInsightsViewerStateQuery": {
+  "data": {
+   "__typename": "Query",
+   "strong_id__": null,
+   "ig_account_insights": {
+    "is_cx_user": false,
+    "cx_insights_enabled": false,
+    "premium_insights": null
+   }
+  }
+ }
+}

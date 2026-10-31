@@ -8,32 +8,15 @@ import (
 	"strings"
 )
 
-const (
-	urlStoryViewers = "media/%s/list_reel_media_viewer/"
-
-	docLongformInsights      = "142319532318085841412086369996"
-	friendlyLongformInsights = "LongformInsightsQuery"
-
-	docMediaInsightsGrid      = "13476930769765169094605715723"
-	friendlyMediaInsightsGrid = "IGInsightsIntegratedMediaGridQuery"
-
-	docCommentInsightsOptIn         = "1221062957381201146258962681"
-	rootCommentInsightsOptIn        = "xdt_get_comment_summary_opt_in_status_by_user_id"
-	friendlyCommentInsightsOptIn    = "IGCommentInsightsOptinStatusQuery"
-	docSetCommentInsightsOptIn      = "34077348003540024418408340205"
-	rootSetCommentInsightsOptIn     = "xdt_update_comment_summary_opt_in_by_user_id"
-	friendlySetCommentInsightsOptIn = "IGCommentInsightsOptinStatusMutation"
-)
-
 // Metric is one labelled insights figure as the app shows it; Value stays nil
 // until Instagram has data.
 type Metric struct {
-	ID             string          `json:"id"`
-	Label          string          `json:"label"`
-	Format         string          `json:"format"` // COUNT, PERCENTAGE, DURATION_SECONDS
-	FormattedValue string          `json:"formatted_value"`
-	Value          *float64        `json:"value"`
-	Benchmark      json.RawMessage `json:"benchmark"`
+	ID             string             `json:"id"`
+	Label          string             `json:"label"`
+	Format         string             `json:"format"` // COUNT, PERCENTAGE, DURATION_SECONDS
+	FormattedValue string             `json:"formatted_value"`
+	Value          *float64           `json:"value"`
+	Benchmark      *InsightsBenchmark `json:"benchmark"`
 }
 
 // ReelInsights are the metrics of a Reel or long-form video.
@@ -67,16 +50,13 @@ type mediaIGIDVars struct {
 // which serves Reels; its ReelInsightsQuery needs variables the decompiled app
 // does not name.
 func (item *Item) ReelInsights(ctx context.Context) (*ReelInsights, error) {
-	raw, err := item.insta.graphQLOnlyRoot(ctx, gqlQuery{
+	var in ReelInsights
+	err := item.insta.graphQLRoot(ctx, gqlQuery{
 		url:      graphQLWWWURL,
 		friendly: friendlyLongformInsights,
 		docID:    docLongformInsights,
-	}, mediaIGIDVars{MediaIGID: item.pk()})
+	}, mediaIGIDVars{MediaIGID: item.pk()}, &in)
 	if err != nil {
-		return nil, err
-	}
-	var in ReelInsights
-	if err := json.Unmarshal(raw, &in); err != nil {
 		return nil, err
 	}
 	return &in, nil
@@ -118,7 +98,17 @@ func (account *Account) MediaInsightsGrid(product MediaProduct) *Pager[json.RawM
 	}
 	var cursor string
 	return newPager(func(ctx context.Context) ([]json.RawMessage, string, error) {
-		raw, err := account.insta.graphQLOnlyRoot(ctx, gqlQuery{
+		var page struct {
+			BusinessManager struct {
+				Medias struct {
+					Edges []struct {
+						Node json.RawMessage `json:"node"`
+					} `json:"edges"`
+					PageInfo graphQLPageInfo `json:"page_info"`
+				} `json:"medias"`
+			} `json:"business_manager"`
+		}
+		err := account.insta.graphQLRoot(ctx, gqlQuery{
 			url:      graphQLWWWURL,
 			friendly: friendlyMediaInsightsGrid,
 			docID:    docMediaInsightsGrid,
@@ -132,24 +122,8 @@ func (account *Account) MediaInsightsGrid(product MediaProduct) *Pager[json.RawM
 			MediaProductType:             product,
 			Cursor:                       cursor,
 			CallerID:                     "BOOST_MEDIA_PICKER",
-		})
+		}, &page)
 		if err != nil {
-			return nil, "", err
-		}
-		var page struct {
-			BusinessManager struct {
-				Medias struct {
-					Edges []struct {
-						Node json.RawMessage `json:"node"`
-					} `json:"edges"`
-					PageInfo struct {
-						HasNextPage bool   `json:"has_next_page"`
-						EndCursor   string `json:"end_cursor"`
-					} `json:"page_info"`
-				} `json:"medias"`
-			} `json:"business_manager"`
-		}
-		if err := json.Unmarshal(raw, &page); err != nil {
 			return nil, "", err
 		}
 		m := page.BusinessManager.Medias
@@ -239,25 +213,4 @@ func (item *Item) StoryViewers() *Pager[*User] {
 		}
 		return item.insta.usersFrom(page.Users, entryContext{}), maxID, nil
 	})
-}
-
-// graphQLOnlyRoot runs a query whose root field name is not known and returns the
-// response's single data field.
-func (insta *Instagram) graphQLOnlyRoot(ctx context.Context, gq gqlQuery, vars any) (json.RawMessage, error) {
-	body, err := insta.graphQL(ctx, gq, vars)
-	if err != nil {
-		return nil, err
-	}
-	var resp struct {
-		Data map[string]json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, err
-	}
-	for k, v := range resp.Data {
-		if k != "__typename" && string(v) != "null" {
-			return v, nil
-		}
-	}
-	return nil, fmt.Errorf("%s: %w", gq.friendly, ErrEmptyResponse)
 }

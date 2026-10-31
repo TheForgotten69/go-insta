@@ -24,6 +24,20 @@ All notable changes to this project are documented here. The project uses
   `Thread.Messages`, `Thread.SendText`, `Instagram.SendDirectText`, `Thread.MarkSeen`.
   Sending and mark-seen use the app's legacy REST endpoints (the app itself uses
   MQTT) and are not verified live.
+- Analytics, for professional accounts:
+  - Account dashboard: `Account.InsightsHome`, `InsightsOverview` (views, reach,
+    interactions, by follower and content type), `InsightsAudience` (followers,
+    active times, age, top cities and countries), `InsightsContent` (pager, sortable
+    by metric and type), `InsightsMediaComponent`, `InsightsBioLinks`,
+    `InsightsPreviousBioLinks`, `InsightsViewerState`, with `InsightsPeriod` presets
+    and `CustomPeriod`.
+  - Content: `Item.ReelInsights` (views, watch time, skip and share rate, follows),
+    `Account.MediaInsightsGrid`, `Item.StoryViewers`, and the comment summary opt-in.
+  - Creator: `Account.SubscriptionInsights`; `SeriesInsightsOverview` /
+    `Engagement` / `Audience` and `Account.FanClubInsights` return raw JSON and are
+    not verified live (the test account has no series or fan club).
+  - `Account.AcceptInsightsTerms` and the story insights opt-in and reset calls,
+    not run live: accepting the terms cannot be undone.
 
 ### Enhancements
 
@@ -33,11 +47,14 @@ All notable changes to this project are documented here. The project uses
   unchanged.
 - GraphQL: per-query gzip and the per-endpoint null-validation header the app sends;
   one root lookup that also accepts aliased roots (`1$field(...)`); missing roots
-  wrap `ErrEmptyResponse`.
+  wrap `ErrEmptyResponse`; a null root with errors returns the `*GraphQLError`, also
+  when the response carries data, and so does a response with only errors.
 
 ### Bug fixes
 
 - `Item.Insights` reads the live (non-aliased) root key.
+- `User.Info` and the account decode on professional accounts, which send a bool
+  where personal accounts send an object.
 - `ReelOptions.Trial` is documented to fail with HTTP 500 on personal accounts, where
   the Reel can still be published as a normal Reel.
 

@@ -133,6 +133,12 @@ const (
 	urlDirectThread       = "direct_v2/threads/%s/"
 	urlDirectSendText     = "direct_v2/threads/broadcast/text/"
 	urlDirectItemSeen     = "direct_v2/threads/%s/items/%s/seen/"
+
+	urlStoryViewers          = "media/%s/list_reel_media_viewer/"
+	urlUserPayInsights       = "creators/user_pay/insights/"
+	urlAcceptInsightsTerms   = "users/accept_insights_terms/"
+	urlStoriesOptInMonthBack = "insights/stories_opt_in_month_back/"
+	urlResetStoriesOptIn     = "insights/reset_stories_opt_in/"
 )
 
 var (

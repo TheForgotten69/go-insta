@@ -4,41 +4,45 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
 
-var accountInsightsBodies = map[string]string{
-	friendlyAccountInsightsHome: `{"data":{"ig_account_insights":{
-		"summary_unit":{"layout":"GRID","tiles":[{"id":"views","title":"Views","metric":{"formatted_value":"1.2K","value":1200},"delta":{"value":"+5%","sentiment":"POSITIVE"},"time_series":{"data_points":[]}}]},
-		"tools":[{"id":"BEST_TIMES","title":"Best times to post","destination":"ig://x","destination_type":"DEEPLINK"}],
-		"home_bloks":{"component":{"bundle":{"bloks_bundle_tree":"{\"tree\":1}"}}}},
-		"next_steps":{"cards":[]}}}`,
-	friendlyAccountInsightsContent: `{"data":{"ig_account_insights":{"your_content":{
-		"items":[{"thumbnail":{"media_id":"31","media_url":"https://x/1.jpg","media_type":"IMAGE","caption_text":"hi","creation_time":1793400000,"is_collab":true},
-			"metrics":[{"metric":"views","value":42},{"metric":"likes","value":null}]}],
-		"page_info":{"end_cursor":"c2","has_next_page":true}}}}}`,
-	friendlyAccountInsightsBioLinks: `{"data":{"ig_account_insights":{"bio_links":{
-		"taps":{"value":7,"benchmark":{"value":3.5,"comparison":"ABOVE","sentiment":"POSITIVE","display_string":"2x"}},
-		"page_views":{"value":70},
-		"links":{"links":{"edges":[{"node":{"id":"l1","title":"Site","display_url":"x.com","taps":{"value":7}}}],"page_info":{"has_next_page":false}}},
-		"previous_links":{"has_links":true}}}}}`,
-	friendlyAccountInsightsPrevBioLinks: `{"data":{"ig_account_insights":{"bio_links":{"previous_links":{"links":{
-		"edges":[{"node":{"id":"old","title":"Old","taps":{"value":1}}}],"page_info":{"end_cursor":"p2","has_next_page":false}}}}}}}`,
-	friendlyAccountInsightsViewerState:  `{"data":{"ig_account_insights":{"premium_insights":{"strings":{"brand_name":"Meta Verified"}}}}}`,
-	friendlyAccountInsightsMedia:        `{"data":{"1$ig_account_insights(media_id:\"31\")":{"carousel":{"component":{"bundle":{"bloks_bundle_tree":"tree"}}}}}}`,
-	friendlyAccountInsightsOverview:     `{"data":{"ig_account_insights":{"overview":1}}}`,
-	friendlyAccountInsightsAudience:     `{"data":{"ig_account_insights":{"audience":1}}}`,
-	friendlyActionableInsightsTipBanner: `{"data":{"tip":{"text":"post more"}}}`,
+// Live responses on the Creator test account (2026-10-31), lists cut to two
+// entries; the bio links bodies are made up, as that account has no links.
+func accountInsightsBodies(t *testing.T) map[string]string {
+	raw, err := os.ReadFile("testdata/accountinsights.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var live map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &live); err != nil {
+		t.Fatal(err)
+	}
+	bodies := map[string]string{
+		friendlyAccountInsightsBioLinks: `{"data":{"ig_account_insights":{"bio_links":{
+			"taps":{"value":7,"benchmark":{"value":3.5,"comparison":"HIGHER","sentiment":"POSITIVE","display_string":"2x"}},
+			"page_views":{"value":70},
+			"links":{"links":{"edges":[{"node":{"id":"l1","title":"Site","display_url":"x.com","taps":{"value":7}}}],"page_info":{"has_next_page":false}}},
+			"previous_links":{"has_links":true}}}}}`,
+		friendlyAccountInsightsPrevBioLinks: `{"data":{"ig_account_insights":{"bio_links":{"previous_links":{"links":{
+			"edges":[{"node":{"id":"old","title":"Old","taps":{"value":1}}}],"page_info":{"end_cursor":"p2","has_next_page":false}}}}}}}`,
+	}
+	for name, body := range live {
+		bodies[name] = string(body)
+	}
+	return bodies
 }
 
 func TestAccountInsightsRequests(t *testing.T) {
 	insta, _ := newReplay(t)
+	bodies := accountInsightsBodies(t)
 	calls := capture(t, insta, func(s sent) (int, string) {
 		// One line: a multi-line body reads as an incremental (NDJSON) response.
 		var b bytes.Buffer
-		if err := json.Compact(&b, []byte(accountInsightsBodies[s.payload["fb_api_req_friendly_name"].(string)])); err != nil {
+		if err := json.Compact(&b, []byte(bodies[s.payload["fb_api_req_friendly_name"].(string)])); err != nil {
 			t.Fatal(err)
 		}
 		return 200, b.String()
@@ -75,9 +79,10 @@ func TestAccountInsightsRequests(t *testing.T) {
 		"period": "THIS_MONTH", "startDate": nil, "endDate": nil, "includeTools": true, "includeMetaOneSubtitle": true,
 		"includeNextStepsTips": true, "includeAIGuidance": true, "meta_one_pacing_key": metaOnePacingPro, "bloksVersioningId": bloks,
 	})
-	if home.Layout != "GRID" || len(home.Tiles) != 1 || *home.Tiles[0].Metric.Value != 1200 || home.Tiles[0].Delta.Sentiment != "POSITIVE" ||
-		len(home.Tools) != 1 || home.Tools[0].DestinationType != "DEEPLINK" || home.BloksTree != `{"tree":1}` ||
-		!strings.Contains(string(home.Raw), "next_steps") {
+	if home.Layout != "HERO_PLUS_TWO" || len(home.Tiles) != 2 || *home.Tiles[0].Metric.Value != 33 ||
+		home.Tiles[0].Delta.Sentiment != "POSITIVE" || len(home.Tiles[0].TimeSeries.DataPoints) != 2 || home.Tiles[1].ID != "followers" ||
+		len(home.Tools) != 2 || home.Tools[0].ID != "ACCOUNT_STATUS" || home.NextStepsBloks != `{"tree":1}` ||
+		home.MetaOneEligibility != "INELIGIBLE" {
 		t.Errorf("home = %+v", home)
 	}
 	if _, err := acc.InsightsHome(ctx, InsightsHomeOptions{Period: PeriodLast90Days, Creator: true}); err != nil {
@@ -99,15 +104,11 @@ func TestAccountInsightsRequests(t *testing.T) {
 	}
 	check(friendlyAccountInsightsContent, docAccountInsightsContent, rootAccountInsights, contentVars)
 	it := content.Items
-	if len(it) != 1 || it[0].Thumbnail.MediaID != "31" || it[0].Thumbnail.CreationTime != 1793400000 || !it[0].Thumbnail.IsCollab ||
-		len(it[0].Metrics) != 2 || *it[0].Metrics[0].Value != 42 || it[0].Metrics[1].Value != nil || !content.More() {
+	if len(it) != 2 || it[0].Thumbnail.MediaID != "4017451613201790201" || it[0].Thumbnail.CreationTime != 1793137574 ||
+		it[0].Thumbnail.MediaType != "post" || len(it[0].Metrics) != 6 || *it[0].Metrics[4].Value != 8 || it[0].Metrics[5].Value != nil ||
+		content.More() {
 		t.Errorf("content = %+v", it)
 	}
-	if err := content.Next(ctx); err != nil {
-		t.Fatal(err)
-	}
-	contentVars["after"] = "c2"
-	check(friendlyAccountInsightsContent, docAccountInsightsContent, rootAccountInsights, contentVars)
 	if err := acc.InsightsContent(ContentInsightsOptions{Ascending: true}).Next(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +143,7 @@ func TestAccountInsightsRequests(t *testing.T) {
 	}
 	check(friendlyAccountInsightsViewerState, docAccountInsightsViewerState, rootAccountInsights,
 		map[string]any{"period": "THIS_MONTH", "includePremiumInsights": true})
-	if state.BrandName != "Meta Verified" {
+	if state.IsCXUser || state.CXInsightsEnabled || string(state.PremiumInsights) != "null" {
 		t.Errorf("viewer state = %+v", state)
 	}
 
@@ -152,36 +153,44 @@ func TestAccountInsightsRequests(t *testing.T) {
 	}
 	check(friendlyAccountInsightsMedia, docAccountInsightsMediaComponent, rootAccountInsights,
 		map[string]any{"mediaId": "31", "bloksVersioningId": bloks})
-	if tree != "tree" {
+	if tree != `{"tree":1}` {
 		t.Errorf("media component = %q", tree)
 	}
 
-	for _, tc := range []struct {
-		name, docID string
-		call        func() (json.RawMessage, error)
-	}{
-		{friendlyAccountInsightsOverview, docAccountInsightsOverview, func() (json.RawMessage, error) { return acc.InsightsOverview(ctx, PeriodLast14Days) }},
-		{friendlyAccountInsightsAudience, docAccountInsightsAudience, func() (json.RawMessage, error) { return acc.InsightsAudience(ctx, PeriodLast14Days) }},
-	} {
-		raw, err := tc.call()
-		if err != nil {
-			t.Fatal(err)
-		}
-		check(tc.name, tc.docID, rootAccountInsights,
-			map[string]any{"period": "LAST_14_DAYS", "startDate": nil, "endDate": nil, "bloksVersioningId": bloks})
-		if !strings.Contains(string(raw), ":1") {
-			t.Errorf("%s = %s", tc.name, raw)
-		}
-	}
-
-	raw, err := acc.InsightsTipBanner(ctx)
+	over, err := acc.InsightsOverview(ctx, PeriodLast14Days)
 	if err != nil {
 		t.Fatal(err)
 	}
-	check(friendlyActionableInsightsTipBanner, docActionableInsightsTipBanner, "", map[string]any{})
-	if !strings.Contains(string(raw), "post more") {
-		t.Errorf("tip banner = %s", raw)
+	check(friendlyAccountInsightsOverview, docAccountInsightsOverview, rootAccountInsights, map[string]any{
+		"period": "LAST_14_DAYS", "startDate": nil, "endDate": nil, "redesignEnabled": true, "bloksVersioningId": bloks})
+	if *over.Views.Total.Value != 33 || over.Views.Total.Benchmark.Comparison != "HIGHER" || *over.Views.Share.Follower.Value != 0.152 ||
+		over.ViewsByContentType.Total != 33 || over.ViewsByContentType.Entries[0].NonFollowerCount != 22 ||
+		over.ViewsByContentType.Entries[0].FacebookCount != nil || *over.Viewers.Value != 10 || *over.Interactions.Total.Value != 21 ||
+		*over.Interactions.NonFollower.Value != 1 || over.InteractionsByContentType.Total.Total != 21 ||
+		over.InteractionsByContentType.ByType[0].Type != "likes" || over.InteractionsByContentType.ByType[0].Entries[0].Value != 4 ||
+		*over.ProfileVisits.Value != 8 || over.LinkPageViews.Value != nil || len(over.ViewsOverTime.DataPoints) != 2 {
+		t.Errorf("overview = %+v", over)
 	}
+
+	aud, err := acc.InsightsAudience(ctx, CustomPeriod(start, end))
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(friendlyAccountInsightsAudience, docAccountInsightsAudience, rootAccountInsights, map[string]any{
+		"period": "CUSTOM", "startDate": 1793000000.0, "endDate": 1793400000.0, "redesignEnabled": true,
+		"useFollowerSnapshot": true, "topLanguagesEnabled": true, "bloksVersioningId": bloks})
+	if *aud.Followers.Value != 3 || aud.FollowersDelta.Value != "--" || len(aud.ActiveTimes.Slots) != 2 || aud.ActiveTimes.Slots[1].Hour != 3 ||
+		len(aud.Age.Entries) != 2 || aud.Age.Entries[0].AgeRange != "13-17" || len(aud.TopCities) != 2 || aud.TopCountries[0].Name != "--" ||
+		len(aud.ActiveFollowersOverTime.DataPoints) != 2 {
+		t.Errorf("audience = %+v", aud)
+	}
+	if _, err := acc.InsightsAudience(ctx, PeriodThisWeek); err != nil {
+		t.Fatal(err)
+	}
+	if v := last().vars(); v["useFollowerSnapshot"] != false {
+		t.Errorf("audience vars = %v", v)
+	}
+
 	for _, c := range *calls {
 		if c.req.Header.Get("Content-Encoding") == "gzip" {
 			t.Errorf("%v sent gzipped", c.payload["fb_api_req_friendly_name"])

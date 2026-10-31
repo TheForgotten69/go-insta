@@ -36,6 +36,44 @@ const (
 	rootUpsertTranslationsCreation  = "xig_upsert_user_translations_creation_settings"
 	friendlyTranslationsUser        = "TranslationsUserQuery"
 	friendlyUpsertTranslationsInput = "UpsertUserTranslationsCreationSettings"
+
+	docLongformInsights      = "142319532318085841412086369996"
+	friendlyLongformInsights = "LongformInsightsQuery"
+
+	docMediaInsightsGrid      = "13476930769765169094605715723"
+	friendlyMediaInsightsGrid = "IGInsightsIntegratedMediaGridQuery"
+
+	docCommentInsightsOptIn         = "1221062957381201146258962681"
+	rootCommentInsightsOptIn        = "xdt_get_comment_summary_opt_in_status_by_user_id"
+	friendlyCommentInsightsOptIn    = "IGCommentInsightsOptinStatusQuery"
+	docSetCommentInsightsOptIn      = "34077348003540024418408340205"
+	rootSetCommentInsightsOptIn     = "xdt_update_comment_summary_opt_in_by_user_id"
+	friendlySetCommentInsightsOptIn = "IGCommentInsightsOptinStatusMutation"
+
+	docSeriesInsightsOverview   = "383515635314126103399555900562"
+	docSeriesInsightsEngagement = "281083989014079368110826164376"
+	docSeriesInsightsAudience   = "386340097017018189326628161392"
+	docFanClubInsights          = "147178694610827473488858200058"
+	rootLinkedMediaPlaylist     = "fetch__XIGLinkedMediaPlaylist"
+	rootFanClubInsights         = "node"
+
+	rootAccountInsights                 = "ig_account_insights"
+	docAccountInsightsHome              = "38444011412098991622225483328"
+	docAccountInsightsOverview          = "297851856213787890962497531867"
+	docAccountInsightsAudience          = "11313478377027549324232575805"
+	docAccountInsightsContent           = "246019450711285746558777381992"
+	docAccountInsightsMediaComponent    = "348470172667229184692559590"
+	docAccountInsightsBioLinks          = "241501507416321773369365046568"
+	docAccountInsightsPreviousBioLinks  = "237951042513594934414540638102"
+	docAccountInsightsViewerState       = "16422176244090456288187318494"
+	friendlyAccountInsightsHome         = "AccountInsightsHomeQuery"
+	friendlyAccountInsightsOverview     = "AccountInsightsOverviewQuery"
+	friendlyAccountInsightsAudience     = "AccountInsightsAudienceQuery"
+	friendlyAccountInsightsContent      = "AccountInsightsContentQuery"
+	friendlyAccountInsightsMedia        = "AccountInsightsMediaComponentQuery"
+	friendlyAccountInsightsBioLinks     = "AccountInsightsBioLinksQuery"
+	friendlyAccountInsightsPrevBioLinks = "AccountInsightsPreviousBioLinksQuery"
+	friendlyAccountInsightsViewerState  = "AccountInsightsViewerStateQuery"
 )
 
 type gqlQuery struct {
@@ -228,16 +266,6 @@ func deepMerge(dst, src map[string]any) {
 	}
 }
 
-// rootField returns the canonical-named field "1$<name>(...)" from a GraphQL data object.
-func rootField(data map[string]json.RawMessage, name string) (json.RawMessage, bool) {
-	for k, v := range data {
-		if isRootKey(k, name) {
-			return v, true
-		}
-	}
-	return nil, false
-}
-
 // isRootKey reports whether key names field name, as is or aliased
 // ("1$name" or "1$name(args)").
 func isRootKey(key, name string) bool {
@@ -248,23 +276,40 @@ func isRootKey(key, name string) bool {
 	return ok && (alias == name || strings.HasPrefix(alias, name+"("))
 }
 
-// graphQLRoot runs the query and decodes its root field (gq.root) into out.
-func (insta *Instagram) graphQLRoot(ctx context.Context, gq gqlQuery, vars, out any) error {
+// graphQLData runs the query and returns its data fields and its root: gq.root,
+// or with none the single non-null field. A null or missing root is the
+// response's first error, else ErrEmptyResponse.
+func (insta *Instagram) graphQLData(ctx context.Context, gq gqlQuery, vars any) (map[string]json.RawMessage, json.RawMessage, error) {
 	body, err := insta.graphQL(ctx, gq, vars)
+	if err != nil {
+		return nil, nil, err
+	}
+	var resp struct {
+		Data   map[string]json.RawMessage `json:"data"`
+		Errors []GraphQLError             `json:"errors"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, nil, err
+	}
+	for k, v := range resp.Data {
+		if string(v) == "null" || (gq.root == "" && k == "__typename") || (gq.root != "" && !isRootKey(k, gq.root)) {
+			continue
+		}
+		return resp.Data, v, nil
+	}
+	if len(resp.Errors) > 0 {
+		return nil, nil, fmt.Errorf("%s: %w", gq.friendly, &resp.Errors[0])
+	}
+	return nil, nil, fmt.Errorf("%s: %w", gq.friendly, ErrEmptyResponse)
+}
+
+// graphQLRoot runs the query and decodes its root (see graphQLData) into out.
+func (insta *Instagram) graphQLRoot(ctx context.Context, gq gqlQuery, vars, out any) error {
+	_, root, err := insta.graphQLData(ctx, gq, vars)
 	if err != nil {
 		return err
 	}
-	var resp struct {
-		Data map[string]json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return err
-	}
-	raw, ok := rootField(resp.Data, gq.root)
-	if !ok || string(raw) == "null" {
-		return fmt.Errorf("%s: %w", gq.friendly, ErrEmptyResponse)
-	}
-	return json.Unmarshal(raw, out)
+	return json.Unmarshal(root, out)
 }
 
 func (user *User) Posts() *Pager[*Item] {

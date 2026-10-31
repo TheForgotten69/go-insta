@@ -81,6 +81,7 @@ func main() {
 	r := &runner{ctx: ctx, pause: *pause}
 	readAccount(r, insta, dir)
 	readAccountExtras(r, insta)
+	readAnalytics(r, insta)
 	firstPost := readFeeds(r, insta)
 	user := readUser(r, insta, *target, dir)
 	readPlaces(r, insta)
@@ -161,6 +162,91 @@ func readAccountExtras(r *runner, insta *goinsta.Instagram) {
 			return "", err
 		}
 		return fmt.Sprintf("likes=%d views=%d", in.Likes, in.TotalViews), nil
+	})
+}
+
+// readAnalytics needs a professional account; a personal one fails these steps.
+func readAnalytics(r *runner, insta *goinsta.Instagram) {
+	ctx, acc := r.ctx, insta.Account
+	r.step("account.InsightsHome", func() (string, error) {
+		h, err := acc.InsightsHome(ctx, goinsta.InsightsHomeOptions{})
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d tiles, %d tools", len(h.Tiles), len(h.Tools)), nil
+	})
+	r.step("account.InsightsOverview", func() (string, error) {
+		o, err := acc.InsightsOverview(ctx, goinsta.PeriodThisMonth)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("views=%s interactions=%s", o.Views.Total.FormattedValue, o.Interactions.Total.FormattedValue), nil
+	})
+	r.step("account.InsightsAudience", func() (string, error) {
+		a, err := acc.InsightsAudience(ctx, goinsta.PeriodThisMonth)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("followers=%s, %d age ranges", a.Followers.FormattedValue, len(a.Age.Entries)), nil
+	})
+	var newest string
+	r.step("account.InsightsContent", func() (string, error) {
+		c := acc.InsightsContent(goinsta.ContentInsightsOptions{})
+		err := c.Next(ctx)
+		if len(c.Items) > 0 {
+			newest = c.Items[0].Thumbnail.MediaID
+		}
+		return fmt.Sprintf("%d items", len(c.Items)), err
+	})
+	if newest != "" {
+		r.step("account.InsightsMediaComponent", func() (string, error) {
+			tree, err := acc.InsightsMediaComponent(ctx, newest)
+			return fmt.Sprintf("%d-byte bundle", len(tree)), err
+		})
+	}
+	r.step("account.InsightsBioLinks + PreviousBioLinks", func() (string, error) {
+		l, err := acc.InsightsBioLinks(ctx, goinsta.PeriodThisMonth)
+		if err != nil {
+			return "", err
+		}
+		prev := acc.InsightsPreviousBioLinks(goinsta.PeriodThisMonth)
+		return fmt.Sprintf("%d links", len(l.Links)), prev.Next(ctx)
+	})
+	r.step("account.InsightsViewerState", func() (string, error) {
+		_, err := acc.InsightsViewerState(ctx, goinsta.PeriodThisMonth, true)
+		return "", err
+	})
+	r.step("account.MediaInsightsGrid (Reels)", func() (string, error) {
+		g := acc.MediaInsightsGrid(goinsta.MediaProductReels)
+		err := g.Next(ctx)
+		return fmt.Sprintf("%d Reels", len(g.Items)), err
+	})
+	r.step("item.ReelInsights (newest own Reel)", func() (string, error) {
+		posts := acc.User().Posts()
+		if err := posts.Next(ctx); err != nil {
+			return "", err
+		}
+		for _, it := range posts.Items {
+			if it.ProductType == "clips" {
+				in, err := it.ReelInsights(ctx)
+				if err != nil {
+					return "", err
+				}
+				return "views=" + in.Views.FormattedValue, nil
+			}
+		}
+		return "no own Reel", nil
+	})
+	r.step("account.CommentInsightsOptIn", func() (string, error) {
+		on, err := acc.CommentInsightsOptIn(ctx)
+		return fmt.Sprintf("opted in=%v", on), err
+	})
+	r.step("account.SubscriptionInsights", func() (string, error) {
+		s, err := acc.SubscriptionInsights(ctx)
+		if err != nil {
+			return "", err
+		}
+		return "earned " + s.TotalEarned, nil
 	})
 }
 

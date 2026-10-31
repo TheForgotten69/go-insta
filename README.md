@@ -58,10 +58,16 @@ err = hl.AddItems(ctx, otherStory)
 err = hl.Edit(ctx, goinsta.HighlightEdit{Title: "Trips 2026", Cover: otherStory, Remove: []*goinsta.Item{story}})
 err = hl.Archive(ctx) // hidden from the profile; Unarchive shows it again
 err = hl.Delete(ctx)
+
+// Analytics (professional accounts).
+over, err := insta.Account.InsightsOverview(ctx, goinsta.PeriodLast90Days) // views, reach, interactions
+aud, err := insta.Account.InsightsAudience(ctx, goinsta.PeriodThisMonth)   // followers, active times, demographics
+in, err := reel.ReelInsights(ctx)                                          // views, watch time, skip rate
 ```
 
 Pagers: `Timeline()`, `Reels()`, `Collections()`, `Activity()`, `SearchUsers()`,
-`User.Posts/Followers/Following()`, `Item.Comments()`, `Collection.Posts()`.
+`User.Posts/Followers/Following()`, `Item.Comments()`, `Collection.Posts()`,
+`Account.InsightsContent()`, `Account.MediaInsightsGrid()`, `Item.StoryViewers()`.
 
 One `*Instagram` can be shared across goroutines; each pager belongs to one.
 `Login` must not overlap other requests. Rate-limit waits and, at debug level,

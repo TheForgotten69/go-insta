@@ -19,48 +19,32 @@ func TestLiveAccountInsights(t *testing.T) {
 	defer insta.ExportSession("login.session.json")
 	ctx := t.Context()
 	acc := insta.Account
-	bloks := acc.bloksID()
-	period := PeriodThisMonth.vars()
-
-	var mediaID string
-	posts := acc.User().Posts()
-	if err := posts.Next(ctx); err == nil && len(posts.Items) > 0 {
-		mediaID = posts.Items[0].pk()
+	show := func(name string, v any, err error) {
+		t.Helper()
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			return
+		}
+		t.Logf("%s: %+v", name, v)
 	}
-
-	for _, q := range []struct {
-		friendly, docID, root string
-		vars                  any
-	}{
-		{friendlyAccountInsightsHome, docAccountInsightsHome, rootAccountInsights, insightsHomeVars{
-			insightsRangeVars: period, IncludeTools: true, IncludeMetaOneSubtitle: true, IncludeNextStepsTips: true,
-			IncludeAIGuidance: true, MetaOnePacingKey: metaOnePacingPro, BloksVersioningID: bloks}},
-		{friendlyAccountInsightsOverview, docAccountInsightsOverview, rootAccountInsights, insightsBloksVars{period, bloks}},
-		{friendlyAccountInsightsAudience, docAccountInsightsAudience, rootAccountInsights, insightsBloksVars{period, bloks}},
-		{friendlyAccountInsightsContent, docAccountInsightsContent, rootAccountInsights, insightsContentVars{
-			insightsRangeVars: period, Metric: string(MetricViews), Count: contentInsightsPageSize, SortDescending: true,
-			BloksVersioningID: bloks}},
-		{friendlyAccountInsightsMedia, docAccountInsightsMediaComponent, rootAccountInsights, insightsMediaComponentVars{mediaID, bloks}},
-		{friendlyAccountInsightsBioLinks, docAccountInsightsBioLinks, rootAccountInsights, period},
-		{friendlyAccountInsightsPrevBioLinks, docAccountInsightsPreviousBioLinks, rootAccountInsights,
-			insightsPreviousBioLinksVars{insightsRangeVars: period, First: previousBioLinksPageSize}},
-		{friendlyAccountInsightsViewerState, docAccountInsightsViewerState, rootAccountInsights,
-			insightsViewerStateVars{Period: period.Period, IncludePremiumInsights: true}},
-		{friendlyActionableInsightsTipBanner, docActionableInsightsTipBanner, "", insightsTipBannerVars{}},
-	} {
-		body, err := insta.graphQL(ctx, gqlQuery{url: graphQLWWWURL, friendly: q.friendly, docID: q.docID, root: q.root}, q.vars)
-		t.Logf("%s: err=%v\n%s", q.friendly, err, body)
-	}
-
 	home, err := acc.InsightsHome(ctx, InsightsHomeOptions{})
-	t.Logf("InsightsHome: %+v err=%v", home, err)
+	show("InsightsHome", home, err)
+	over, err := acc.InsightsOverview(ctx, PeriodThisMonth)
+	show("InsightsOverview", over, err)
+	aud, err := acc.InsightsAudience(ctx, PeriodThisMonth)
+	show("InsightsAudience", aud, err)
 	content := acc.InsightsContent(ContentInsightsOptions{})
-	err = content.Next(ctx)
-	t.Logf("InsightsContent: %+v err=%v", content.Items, err)
+	show("InsightsContent", content.Items, content.Next(ctx))
+	if len(content.Items) > 0 {
+		tree, err := acc.InsightsMediaComponent(ctx, content.Items[0].Thumbnail.MediaID)
+		show("InsightsMediaComponent", len(tree), err)
+	}
 	links, err := acc.InsightsBioLinks(ctx, PeriodThisMonth)
-	t.Logf("InsightsBioLinks: %+v err=%v", links, err)
+	show("InsightsBioLinks", links, err)
+	prev := acc.InsightsPreviousBioLinks(PeriodThisMonth)
+	show("InsightsPreviousBioLinks", prev.Items, prev.Next(ctx))
 	state, err := acc.InsightsViewerState(ctx, PeriodThisMonth, true)
-	t.Logf("InsightsViewerState: %+v err=%v", state, err)
+	show("InsightsViewerState", state, err)
 
 	if os.Getenv("INSIGHTS_WRITE") != "1" {
 		return
