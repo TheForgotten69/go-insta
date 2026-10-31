@@ -1,0 +1,85 @@
+package goinsta
+
+import (
+	"context"
+	"testing"
+	"time"
+)
+
+func TestCreatorInsightsRequests(t *testing.T) {
+	insta, _ := newReplay(t)
+	sent := capture(t, insta, func(s sent) (int, string) {
+		if s.req.URL.Path == "/api/v1/creators/user_pay/insights/" {
+			return 200, `{"status":"ok","total":3}`
+		}
+		return 200, `{"data":{"fetch__XIGLinkedMediaPlaylist":{"id":"1"},"node":{"id":"2"},` +
+			`"xfb_oxsights_event_insights_query_events_for_upsampling":[]},"extensions":{"is_final":true}}`
+	})
+	ctx := t.Context()
+	day := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+
+	for _, tc := range []struct {
+		name, doc string
+		call      func(context.Context) (*CreatorInsights, error)
+		vars      map[string]any
+	}{
+		{"SeriesInsightsOverviewQuery", docSeriesInsightsOverview,
+			func(ctx context.Context) (*CreatorInsights, error) {
+				return insta.SeriesInsightsOverview(ctx, "99", true)
+			},
+			map[string]any{"playlistId": "99", "includeViewsOverTime": true}},
+		{"SeriesInsightsEngagementQuery", docSeriesInsightsEngagement,
+			func(ctx context.Context) (*CreatorInsights, error) { return insta.SeriesInsightsEngagement(ctx, "99") },
+			map[string]any{"playlistId": "99"}},
+		{"SeriesInsightsAudienceQuery", docSeriesInsightsAudience,
+			func(ctx context.Context) (*CreatorInsights, error) { return insta.SeriesInsightsAudience(ctx, "99") },
+			map[string]any{"playlistId": "99"}},
+		{"FanClubInsights", docFanClubInsights,
+			func(ctx context.Context) (*CreatorInsights, error) {
+				return insta.Account.FanClubInsights(ctx, "7", day)
+			},
+			map[string]any{"fan_club_id": "7", "date": "2026-10-31", "count": 50.0}},
+		{"EventInsightsUpsamplingQuery", docEventInsightsUpsampling,
+			func(ctx context.Context) (*CreatorInsights, error) {
+				return insta.EventInsightsNearby(ctx, 48.85, 2.35, time.Hour)
+			},
+			map[string]any{"latitude": 48.85, "longitude": 2.35}},
+	} {
+		in, err := tc.call(ctx)
+		if err != nil || len(in.Raw) == 0 {
+			t.Errorf("%s: %v %v", tc.name, in, err)
+			continue
+		}
+		s := (*sent)[len(*sent)-1]
+		if s.req.URL.Path != "/graphql_www" || s.payload["fb_api_req_friendly_name"] != tc.name || s.payload["client_doc_id"] != tc.doc {
+			t.Errorf("%s: %s %v %v", tc.name, s.req.URL.Path, s.payload["fb_api_req_friendly_name"], s.payload["client_doc_id"])
+		}
+		if s.req.Header.Get("Content-Encoding") == "gzip" {
+			t.Errorf("%s: gzipped", tc.name)
+		}
+		v := s.vars()
+		for k, want := range tc.vars {
+			if v[k] != want {
+				t.Errorf("%s: %s = %v, want %v", tc.name, k, v[k], want)
+			}
+		}
+	}
+	ev := (*sent)[len(*sent)-1].vars()
+	if start, end := ev["start_time"].(float64), ev["end_time"].(float64); end-start != 3600 {
+		t.Errorf("event window = %v..%v", start, end)
+	}
+
+	in, err := insta.Account.SubscriptionInsights(ctx)
+	s := (*sent)[len(*sent)-1]
+	if err != nil || s.req.Method != "GET" || s.req.URL.Path != "/api/v1/creators/user_pay/insights/" || string(in.Raw) == "" {
+		t.Errorf("SubscriptionInsights: %v %s %s", err, s.req.Method, s.req.URL.Path)
+	}
+}
+
+func TestCreatorInsightsEmptyRoot(t *testing.T) {
+	insta, _ := newReplay(t)
+	capture(t, insta, answer(`{"data":{"fetch__XIGLinkedMediaPlaylist":null}}`))
+	if _, err := insta.SeriesInsightsAudience(t.Context(), "1"); err == nil {
+		t.Fatal("null root accepted")
+	}
+}
