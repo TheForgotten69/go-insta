@@ -12,12 +12,34 @@ All notable changes to this project are documented here. The project uses
   `Item.DisableComments` / `EnableComments`, `Item.SetCountsHidden`, `Item.Unarchive`,
   `Comment.Pin` / `Unpin`, `Item.FetchLikers`, `Instagram.MediaInfo`, and for Reels
   `Item.SetRemixAllowed` and `Item.SetDownloads`.
+- Relationships: `User.Block` / `Unblock`, `Account.BlockedUsers`,
+  `Account.UpdateCloseFriends`, `User.Mute` / `Unmute` (posts and/or stories),
+  `User.RemoveFollower`, `Account.PendingFollowRequests`,
+  `User.ApproveFollowRequest` / `IgnoreFollowRequest`.
+- Tags and places: `User.TaggedPosts`, `Item.RemoveTag`, `Instagram.SearchLocations`,
+  `Instagram.LocationInfo`, `Instagram.LocationFeed`.
+- Translations and insights: `Account.TranslationSettings` / `SetTranslationSettings`
+  (AI voice translation, lip sync, approval), `Item.VoiceTranslations`, `Item.Insights`.
+- Direct messages: `Instagram.Inbox` / `PendingInbox` (pagers), `Instagram.Thread`,
+  `Thread.Messages`, `Thread.SendText`, `Instagram.SendDirectText`, `Thread.MarkSeen`.
+  Sending and mark-seen use the app's legacy REST endpoints (the app itself uses
+  MQTT) and are not verified live.
 
 ### Enhancements
 
 - Every request parameter is a named struct instead of a map; only HTTP headers,
-  `ReelOptions.Extra` and maps keyed by dynamic ids remain maps. The wire format is
+  `ReelOptions.Extra` and maps keyed by dynamic ids remain maps. Requests carry them
+  as `reqOptions.Form` / `Signed` and are encoded in one place. The wire format is
   unchanged.
+- GraphQL: per-query gzip and the per-endpoint null-validation header the app sends;
+  one root lookup that also accepts aliased roots (`1$field(...)`); missing roots
+  wrap `ErrEmptyResponse`.
+
+### Bug fixes
+
+- `Item.Insights` reads the live (non-aliased) root key.
+- `ReelOptions.Trial` is documented to fail with HTTP 500 on personal accounts, where
+  the Reel can still be published as a normal Reel.
 
 ## [0.6.0] - 2026-10-31
 
