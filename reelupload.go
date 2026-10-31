@@ -140,8 +140,9 @@ type clipsConfigure struct {
 	FilterType       string        `json:"filter_type"`
 }
 
-// reelFields are the ReelOptions part of a configure_to_clips body.
-// is_auto_resharing_to_story comes from postFields.
+// reelFields are the ReelOptions part of a configure_to_clips body. It must not
+// repeat a postFields key (is_auto_resharing_to_story): encoding/json drops a key
+// that two embedded structs share.
 type reelFields struct {
 	ClipsSharePreviewToFeed           string       `json:"clips_share_preview_to_feed,omitempty"`
 	DisableComments                   string       `json:"disable_comments,omitempty"`

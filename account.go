@@ -111,7 +111,7 @@ func (account *Account) SetStoryAutoArchive(ctx context.Context, on bool) error 
 		v = "on"
 	}
 	_, err := account.insta.call(ctx, &reqOptions{Endpoint: urlSetReelSettings, IsPost: true, Signed: reelSettingsRequest{
-		sessionIDs:      sessionIDs{UID: account.ID.String(), UUID: account.insta.uuid},
+		sessionIDs:      account.insta.sessionIDs(),
 		ReelAutoArchive: v,
 	}})
 	return err

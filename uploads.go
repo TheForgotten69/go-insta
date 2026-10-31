@@ -354,8 +354,7 @@ func (x *postExtras) fields() postFields {
 	return f
 }
 
-// publish configures the post, then reshares it to the story when asked; the
-// payload carries x.fields().
+// publish configures the post, then reshares it to the story when asked.
 func (insta *Instagram) publish(ctx context.Context, endpoint string, payload any, x *postExtras) (*Item, error) {
 	item, err := insta.configure(ctx, endpoint, payload)
 	if err != nil || x.story == nil {
@@ -455,20 +454,14 @@ func (insta *Instagram) UploadAlbum(ctx context.Context, photos []io.Reader, opt
 		return nil, err
 	}
 
-	device, err := json.Marshal(insta.deviceInfo())
-	if err != nil {
-		return nil, err
-	}
+	device := jsonText[configureDevice]{insta.deviceInfo()}
 	children := make([]albumChild, len(ps))
 	for i, p := range ps {
-		editsJSON, _ := json.Marshal(photoEdits(p))
-		extraJSON, _ := json.Marshal(sourceSize{Width: p.w, Height: p.h})
-		stackedJSON, _ := json.Marshal(stackedTimeline(p.uploadID))
 		children[i] = albumChild{
 			UploadID:                 p.uploadID,
-			Device:                   string(device),
-			Edits:                    string(editsJSON),
-			Extra:                    string(extraJSON),
+			Device:                   device,
+			Edits:                    jsonText[mediaEdits]{photoEdits(p)},
+			Extra:                    jsonText[sourceSize]{sourceSize{Width: p.w, Height: p.h}},
 			OriginalWidth:            strconv.Itoa(p.w),
 			OriginalHeight:           strconv.Itoa(p.h),
 			SourceType:               "4",
@@ -477,7 +470,7 @@ func (insta *Instagram) UploadAlbum(ctx context.Context, photos []io.Reader, opt
 			CreationToolInfo:         "[]",
 			HideFromProfileGrid:      "false",
 			BottomCameraDialSelected: "11",
-			StackedTimelineMetadata:  string(stackedJSON),
+			StackedTimelineMetadata:  jsonText[[]timelineStep]{stackedTimeline(p.uploadID)},
 		}
 	}
 	return insta.publish(ctx, urlConfigureSidecar, albumConfigure{
@@ -504,24 +497,34 @@ type albumConfigure struct {
 	OriginalHeight               string         `json:"original_height"`
 }
 
-// albumChild carries device, edits, extra and stacked_timeline_metadata as JSON
-// strings, unlike the top level.
 type albumChild struct {
-	UploadID                       string `json:"upload_id"`
-	Device                         string `json:"device"`
-	Edits                          string `json:"edits"`
-	Extra                          string `json:"extra"`
-	OriginalWidth                  string `json:"original_width"`
-	OriginalHeight                 string `json:"original_height"`
-	SourceType                     string `json:"source_type"`
-	Audience                       string `json:"audience"`
-	TimezoneOffset                 string `json:"timezone_offset"`
-	CreationToolInfo               string `json:"creation_tool_info"`
-	AppAttributionAndroidNamespace string `json:"app_attribution_android_namespace"`
-	HideFromProfileGrid            string `json:"hide_from_profile_grid"`
-	SceneCaptureType               string `json:"scene_capture_type"`
-	BottomCameraDialSelected       string `json:"bottom_camera_dial_selected"`
-	StackedTimelineMetadata        string `json:"stacked_timeline_metadata"`
+	UploadID                       string                    `json:"upload_id"`
+	Device                         jsonText[configureDevice] `json:"device"`
+	Edits                          jsonText[mediaEdits]      `json:"edits"`
+	Extra                          jsonText[sourceSize]      `json:"extra"`
+	OriginalWidth                  string                    `json:"original_width"`
+	OriginalHeight                 string                    `json:"original_height"`
+	SourceType                     string                    `json:"source_type"`
+	Audience                       string                    `json:"audience"`
+	TimezoneOffset                 string                    `json:"timezone_offset"`
+	CreationToolInfo               string                    `json:"creation_tool_info"`
+	AppAttributionAndroidNamespace string                    `json:"app_attribution_android_namespace"`
+	HideFromProfileGrid            string                    `json:"hide_from_profile_grid"`
+	SceneCaptureType               string                    `json:"scene_capture_type"`
+	BottomCameraDialSelected       string                    `json:"bottom_camera_dial_selected"`
+	StackedTimelineMetadata        jsonText[[]timelineStep]  `json:"stacked_timeline_metadata"`
+}
+
+// jsonText marshals V as a JSON string holding V's JSON, the form album
+// children use for nested objects.
+type jsonText[T any] struct{ V T }
+
+func (j jsonText[T]) MarshalJSON() ([]byte, error) {
+	b, err := json.Marshal(j.V)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(string(b))
 }
 
 // UploadStory posts a JPEG or WebP image to the story.
