@@ -36,9 +36,9 @@ func (c *Collection) Posts() *Pager[*Item] {
 	var nextID string
 	var pos int
 	return newPager(func(ctx context.Context) ([]*Item, string, error) {
-		q := map[string]string{}
-		if nextID != "" {
-			q["max_id"] = nextID
+		q, err := formOf(maxIDQuery{MaxID: nextID})
+		if err != nil {
+			return nil, "", err
 		}
 		var resp struct {
 			Items []struct {
@@ -64,14 +64,23 @@ func (c *Collection) Posts() *Pager[*Item] {
 	})
 }
 
+type maxIDQuery struct {
+	MaxID string `json:"max_id,omitempty"`
+}
+
+const collectionTypes = `["ALL_MEDIA_AUTO_COLLECTION","PRODUCT_AUTO_COLLECTION","EMPTY_PRODUCT_AUTO_COLLECTION","MEDIA","AUDIO_AUTO_COLLECTION","SERIES_AUTO_COLLECTION","LONGFORM_AUTO_COLLECTION","LOCATIONS_AUTO_COLLECTION","NEW_COLLECTION"]`
+
+type collectionsQuery struct {
+	CollectionTypes string `json:"collection_types"`
+	MaxID           string `json:"max_id,omitempty"`
+}
+
 func (insta *Instagram) Collections() *Pager[*Collection] {
 	var nextID string
 	return newPager(func(ctx context.Context) ([]*Collection, string, error) {
-		query := map[string]string{
-			"collection_types": `["ALL_MEDIA_AUTO_COLLECTION","PRODUCT_AUTO_COLLECTION","EMPTY_PRODUCT_AUTO_COLLECTION","MEDIA","AUDIO_AUTO_COLLECTION","SERIES_AUTO_COLLECTION","LONGFORM_AUTO_COLLECTION","LOCATIONS_AUTO_COLLECTION","NEW_COLLECTION"]`,
-		}
-		if nextID != "" {
-			query["max_id"] = nextID
+		query, err := formOf(collectionsQuery{CollectionTypes: collectionTypes, MaxID: nextID})
+		if err != nil {
+			return nil, "", err
 		}
 		var resp struct {
 			Items         []*Collection `json:"items"`

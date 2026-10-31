@@ -100,15 +100,19 @@ func (account *Account) ReelSettings(ctx context.Context) (*ReelSettings, error)
 	return &s, nil
 }
 
+type reelSettingsRequest struct {
+	sessionIDs
+	ReelAutoArchive string `json:"reel_auto_archive"`
+}
+
 func (account *Account) SetStoryAutoArchive(ctx context.Context, on bool) error {
 	v := "off"
 	if on {
 		v = "on"
 	}
-	q, err := signedBody(map[string]string{
-		"_uid":              account.ID.String(),
-		"_uuid":             account.insta.uuid,
-		"reel_auto_archive": v,
+	q, err := signedBody(reelSettingsRequest{
+		sessionIDs:      sessionIDs{UID: account.ID.String(), UUID: account.insta.uuid},
+		ReelAutoArchive: v,
 	})
 	if err != nil {
 		return err
@@ -127,6 +131,13 @@ func (account *Account) RestrictedUsers(ctx context.Context) ([]*User, error) {
 	return account.insta.usersFrom(resp.Users, entryContext{}), nil
 }
 
+type aymlRequest struct {
+	UUID                 string `json:"_uuid"`
+	Module               string `json:"module"`
+	PhoneID              string `json:"phone_id"`
+	ProfileChainingCheck string `json:"profile_chaining_check"`
+}
+
 // SuggestedUsers is the "Suggested for you" list (discover/ayml) on the own profile.
 func (account *Account) SuggestedUsers(ctx context.Context) ([]*User, error) {
 	var resp struct {
@@ -136,16 +147,16 @@ func (account *Account) SuggestedUsers(ctx context.Context) ([]*User, error) {
 			} `json:"suggestions"`
 		} `json:"suggested_users"`
 	}
-	err := account.insta.callJSON(ctx, &reqOptions{
-		Endpoint: urlDiscoverAYML,
-		IsPost:   true,
-		Query: map[string]string{
-			"_uuid":                  account.insta.uuid,
-			"module":                 "self_profile",
-			"phone_id":               account.insta.fID,
-			"profile_chaining_check": "true",
-		},
-	}, &resp)
+	q, err := formOf(aymlRequest{
+		UUID:                 account.insta.uuid,
+		Module:               "self_profile",
+		PhoneID:              account.insta.fID,
+		ProfileChainingCheck: "true",
+	})
+	if err != nil {
+		return nil, err
+	}
+	err = account.insta.callJSON(ctx, &reqOptions{Endpoint: urlDiscoverAYML, IsPost: true, Query: q}, &resp)
 	if err != nil {
 		return nil, err
 	}

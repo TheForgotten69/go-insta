@@ -27,6 +27,23 @@ func (insta *Instagram) usersFrom(users []*User, entry entryContext) []*User {
 	return users
 }
 
+type searchUsersQuery struct {
+	SearchSurface     string `json:"search_surface"`
+	SerpSessionID     string `json:"serp_session_id"`
+	QplJoinID         string `json:"qpl_join_id"`
+	SessionState      string `json:"session_state"`
+	DisableAds        string `json:"disable_ads"`
+	EnableLightweight string `json:"enable_lightweight_query_with_basic_mmc_and_media_grid"`
+	SearchSessionID   string `json:"search_session_id"`
+	TimezoneOffset    string `json:"timezone_offset"`
+	EnableMetadata    string `json:"enable_metadata"`
+	SerpOrigination   string `json:"serp_origination"`
+	KeywordContext    string `json:"keyword_context"`
+	Count             string `json:"count"`
+	Query             string `json:"query"`
+	PageToken         string `json:"page_token,omitempty"`
+}
+
 // SearchUsers pages the "Accounts" tab of search. The session ids stay fixed
 // across pages, as the app keeps them; later pages carry the server's page_token.
 func (insta *Instagram) SearchUsers(query string) *Pager[*User] {
@@ -34,23 +51,24 @@ func (insta *Instagram) SearchUsers(query string) *Pager[*User] {
 	searchSession := generateUUID()
 	var pageToken string
 	return newPager(func(ctx context.Context) ([]*User, string, error) {
-		q := map[string]string{
-			"search_surface":  "user_serp",
-			"serp_session_id": serpSession,
-			"qpl_join_id":     serpSession,
-			"session_state":   "typeahead",
-			"disable_ads":     "true",
-			"enable_lightweight_query_with_basic_mmc_and_media_grid": "true",
-			"search_session_id": searchSession,
-			"timezone_offset":   insta.sess.TimezoneOffset,
-			"enable_metadata":   "false",
-			"serp_origination":  "keyboard",
-			"keyword_context":   "null",
-			"count":             "30",
-			"query":             query,
-		}
-		if pageToken != "" {
-			q["page_token"] = pageToken
+		q, err := formOf(searchUsersQuery{
+			SearchSurface:     "user_serp",
+			SerpSessionID:     serpSession,
+			QplJoinID:         serpSession,
+			SessionState:      "typeahead",
+			DisableAds:        "true",
+			EnableLightweight: "true",
+			SearchSessionID:   searchSession,
+			TimezoneOffset:    insta.sess.TimezoneOffset,
+			EnableMetadata:    "false",
+			SerpOrigination:   "keyboard",
+			KeywordContext:    "null",
+			Count:             "30",
+			Query:             query,
+			PageToken:         pageToken,
+		})
+		if err != nil {
+			return nil, "", err
 		}
 		var resp struct {
 			Users     []*User `json:"users"`
@@ -79,71 +97,120 @@ type gqlUser struct {
 }
 
 func (user *User) Followers() *Pager[*User] {
-	return user.followList("FollowersList", docFollowersList, "xdt_api__v1__friendships__followers", entryFollowers, followersVars)
+	return user.followList("FollowersList", docFollowersList, "xdt_api__v1__friendships__followers", entryFollowers, newFollowersVars)
 }
 
 func (user *User) Following() *Pager[*User] {
-	return user.followList("FollowingList", docFollowingList, "xdt_api__v1__friendships__following", entryFollowing, followingVars)
+	return user.followList("FollowingList", docFollowingList, "xdt_api__v1__friendships__following", entryFollowing, newFollowingVars)
 }
 
-func followersVars(id Int64) map[string]any {
-	return map[string]any{
-		"user_id":                          id.String(),
-		"skip_suggested_users":             false,
-		"skip_more_groups_available":       false,
-		"skip_friendship_followers_fields": true,
-		"request_data":                     map[string]any{"rank_token": "", "enableGroups": true},
-		"skip_page_size":                   false,
-		"skip_pending_admins":              false,
-		"skip_has_more":                    false,
-		"search_surface":                   "follow_list_page",
-		"query":                            "",
-		"skip_big_list":                    false,
-		"include_unseen_count":             true,
+type followersVars struct {
+	UserID                        string               `json:"user_id"`
+	SkipSuggestedUsers            bool                 `json:"skip_suggested_users"`
+	SkipMoreGroupsAvailable       bool                 `json:"skip_more_groups_available"`
+	SkipFriendshipFollowersFields bool                 `json:"skip_friendship_followers_fields"`
+	RequestData                   followersRequestData `json:"request_data"`
+	SkipPageSize                  bool                 `json:"skip_page_size"`
+	SkipPendingAdmins             bool                 `json:"skip_pending_admins"`
+	SkipHasMore                   bool                 `json:"skip_has_more"`
+	SearchSurface                 string               `json:"search_surface"`
+	Query                         string               `json:"query"`
+	SkipBigList                   bool                 `json:"skip_big_list"`
+	IncludeUnseenCount            bool                 `json:"include_unseen_count"`
+	MaxID                         string               `json:"max_id,omitempty"`
+}
+
+type followersRequestData struct {
+	RankToken    string `json:"rank_token"`
+	EnableGroups bool   `json:"enableGroups"`
+}
+
+func newFollowersVars(id Int64, maxID string) any {
+	return followersVars{
+		UserID:                        id.String(),
+		SkipFriendshipFollowersFields: true,
+		RequestData:                   followersRequestData{EnableGroups: true},
+		SearchSurface:                 "follow_list_page",
+		IncludeUnseenCount:            true,
+		MaxID:                         maxID,
 	}
 }
 
-func followingVars(id Int64) map[string]any {
-	requestData := map[string]any{"rank_token": "", "supported_capabilities_new": []any{},
-		"includes_hashtags": true, "search_surface": "follow_list_page"}
-	for _, k := range []string{"username", "support_new_api", "absolute_url_processed", "phone_id", "target_id",
-		"page_size", "login_attempt_count", "module", "limit", "ig_sig_key_version", "first", "device_id", "surface",
-		"search_client_type", "ig_sig", "csrfmiddlewaretoken", "query", "adid", "guid", "rank_mutual", "choice",
-		"_uuid", "_uid", "_csrftoken"} {
-		requestData[k] = nil
-	}
-	return map[string]any{
-		"user_id":                             id.String(),
-		"skip_use_clickable_see_more":         false,
-		"skip_preview_hashtags":               false,
-		"skip_should_limit_list_of_followers": false,
-		"skip_pending_admins":                 false,
-		"skip_more_groups_available":          false,
-		"skip_friendship_followers_fields":    false,
-		"request_data":                        requestData,
-		"skip_page_size":                      false,
-		"skip_friend_requests":                false,
-		"skip_big_list":                       false,
-		"query":                               "",
-		"include_profile_update_info":         true,
-		"skip_suggested_users":                false,
-		"include_unseen_count":                true,
-		"skip_has_more":                       false,
-		"enable_groups":                       true,
-		"skip_hashtag_count":                  false,
+type followingVars struct {
+	UserID                         string               `json:"user_id"`
+	SkipUseClickableSeeMore        bool                 `json:"skip_use_clickable_see_more"`
+	SkipPreviewHashtags            bool                 `json:"skip_preview_hashtags"`
+	SkipShouldLimitListOfFollowers bool                 `json:"skip_should_limit_list_of_followers"`
+	SkipPendingAdmins              bool                 `json:"skip_pending_admins"`
+	SkipMoreGroupsAvailable        bool                 `json:"skip_more_groups_available"`
+	SkipFriendshipFollowersFields  bool                 `json:"skip_friendship_followers_fields"`
+	RequestData                    followingRequestData `json:"request_data"`
+	SkipPageSize                   bool                 `json:"skip_page_size"`
+	SkipFriendRequests             bool                 `json:"skip_friend_requests"`
+	SkipBigList                    bool                 `json:"skip_big_list"`
+	Query                          string               `json:"query"`
+	IncludeProfileUpdateInfo       bool                 `json:"include_profile_update_info"`
+	SkipSuggestedUsers             bool                 `json:"skip_suggested_users"`
+	IncludeUnseenCount             bool                 `json:"include_unseen_count"`
+	SkipHasMore                    bool                 `json:"skip_has_more"`
+	EnableGroups                   bool                 `json:"enable_groups"`
+	SkipHashtagCount               bool                 `json:"skip_hashtag_count"`
+	MaxID                          string               `json:"max_id,omitempty"`
+}
+
+// followingRequestData: the app sends the nil-pointer fields as explicit nulls.
+type followingRequestData struct {
+	RankToken                string   `json:"rank_token"`
+	SupportedCapabilitiesNew []string `json:"supported_capabilities_new"`
+	IncludesHashtags         bool     `json:"includes_hashtags"`
+	SearchSurface            string   `json:"search_surface"`
+	Username                 *string  `json:"username"`
+	SupportNewAPI            *string  `json:"support_new_api"`
+	AbsoluteURLProcessed     *string  `json:"absolute_url_processed"`
+	PhoneID                  *string  `json:"phone_id"`
+	TargetID                 *string  `json:"target_id"`
+	PageSize                 *string  `json:"page_size"`
+	LoginAttemptCount        *string  `json:"login_attempt_count"`
+	Module                   *string  `json:"module"`
+	Limit                    *string  `json:"limit"`
+	IgSigKeyVersion          *string  `json:"ig_sig_key_version"`
+	First                    *string  `json:"first"`
+	DeviceID                 *string  `json:"device_id"`
+	Surface                  *string  `json:"surface"`
+	SearchClientType         *string  `json:"search_client_type"`
+	IgSig                    *string  `json:"ig_sig"`
+	CSRFMiddlewareToken      *string  `json:"csrfmiddlewaretoken"`
+	Query                    *string  `json:"query"`
+	AdID                     *string  `json:"adid"`
+	GUID                     *string  `json:"guid"`
+	RankMutual               *string  `json:"rank_mutual"`
+	Choice                   *string  `json:"choice"`
+	UUID                     *string  `json:"_uuid"`
+	UID                      *string  `json:"_uid"`
+	CSRFToken                *string  `json:"_csrftoken"`
+}
+
+func newFollowingVars(id Int64, maxID string) any {
+	return followingVars{
+		UserID: id.String(),
+		RequestData: followingRequestData{
+			SupportedCapabilitiesNew: []string{},
+			IncludesHashtags:         true,
+			SearchSurface:            "follow_list_page",
+		},
+		IncludeProfileUpdateInfo: true,
+		IncludeUnseenCount:       true,
+		EnableGroups:             true,
+		MaxID:                    maxID,
 	}
 }
 
 // The response carries a non-fatal "execution error" in errors[] next to valid data.
-func (user *User) followList(friendly, doc, root string, entry entryContext, varsFor func(Int64) map[string]any) *Pager[*User] {
+func (user *User) followList(friendly, doc, root string, entry entryContext, varsFor func(id Int64, maxID string) any) *Pager[*User] {
 	insta := user.insta
 	var maxID string
 	return newPager(func(ctx context.Context) ([]*User, string, error) {
-		vars := varsFor(user.ID)
-		if maxID != "" {
-			vars["max_id"] = maxID
-		}
-		body, err := insta.graphQL(ctx, gqlQuery{friendly: friendly, docID: doc, root: root}, vars)
+		body, err := insta.graphQL(ctx, gqlQuery{friendly: friendly, docID: doc, root: root}, varsFor(user.ID, maxID))
 		if err != nil {
 			return nil, "", err
 		}
@@ -181,6 +248,12 @@ func (user *User) followList(friendly, doc, root string, entry entryContext, var
 	})
 }
 
+type showManyRequest struct {
+	UUID              string `json:"_uuid"`
+	IncludeFollowedBy string `json:"include_followed_by"`
+	UserIDs           string `json:"user_ids"`
+}
+
 // Friendships returns the friendship status for each user id (friendships/show_many).
 func (insta *Instagram) Friendships(ctx context.Context, ids ...int64) (map[string]Friendship, error) {
 	s := make([]string, len(ids))
@@ -190,15 +263,11 @@ func (insta *Instagram) Friendships(ctx context.Context, ids ...int64) (map[stri
 	var resp struct {
 		Statuses map[string]Friendship `json:"friendship_statuses"`
 	}
-	err := insta.callJSON(ctx, &reqOptions{
-		Endpoint: urlFriendshipShowMany,
-		IsPost:   true,
-		Query: map[string]string{
-			"_uuid":               insta.uuid,
-			"include_followed_by": "true",
-			"user_ids":            strings.Join(s, ", "),
-		},
-	}, &resp)
+	q, err := formOf(showManyRequest{UUID: insta.uuid, IncludeFollowedBy: "true", UserIDs: strings.Join(s, ", ")})
+	if err != nil {
+		return nil, err
+	}
+	err = insta.callJSON(ctx, &reqOptions{Endpoint: urlFriendshipShowMany, IsPost: true, Query: q}, &resp)
 	if err != nil {
 		return nil, err
 	}

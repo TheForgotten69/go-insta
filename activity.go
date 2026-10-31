@@ -114,22 +114,38 @@ type RecentItems struct {
 	Pk     string   `json:"pk"`
 }
 
+type activityQuery struct {
+	CouldTruncateFeed    string `json:"could_truncate_feed"`
+	MarkAsSeen           string `json:"mark_as_seen"`
+	PushDisabled         string `json:"push_disabled"`
+	ShouldSkipSU         string `json:"should_skip_su"`
+	TimezoneName         string `json:"timezone_name"`
+	TimezoneOffset       string `json:"timezone_offset"`
+	MaxID                string `json:"max_id,omitempty"`
+	LastChecked          string `json:"last_checked,omitempty"`
+	FirstRecordTimestamp string `json:"pagination_first_record_timestamp,omitempty"`
+}
+
 func (insta *Instagram) Activity() *Activity {
 	act := &Activity{}
 	var last *activityPage
 	act.Pager = newPager(func(ctx context.Context) ([]RecentItems, string, error) {
-		query := map[string]string{
-			"could_truncate_feed": "true",
-			"mark_as_seen":        "false",
-			"push_disabled":       "true",
-			"should_skip_su":      "true",
-			"timezone_name":       insta.sess.TimezoneName,
-			"timezone_offset":     insta.sess.TimezoneOffset,
+		req := activityQuery{
+			CouldTruncateFeed: "true",
+			MarkAsSeen:        "false",
+			PushDisabled:      "true",
+			ShouldSkipSU:      "true",
+			TimezoneName:      insta.sess.TimezoneName,
+			TimezoneOffset:    insta.sess.TimezoneOffset,
 		}
 		if last != nil {
-			query["max_id"] = last.NextID
-			query["last_checked"] = fmt.Sprintf("%f", last.LastChecked)
-			query["pagination_first_record_timestamp"] = fmt.Sprintf("%f", last.FirstRecTs)
+			req.MaxID = last.NextID
+			req.LastChecked = fmt.Sprintf("%f", last.LastChecked)
+			req.FirstRecordTimestamp = fmt.Sprintf("%f", last.FirstRecTs)
+		}
+		query, err := formOf(req)
+		if err != nil {
+			return nil, "", err
 		}
 		var page activityPage
 		if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlActivityRecent, Query: query}, &page); err != nil {
@@ -151,10 +167,14 @@ func (insta *Instagram) Activity() *Activity {
 }
 
 func (insta *Instagram) MarkActivitySeen(ctx context.Context) error {
-	_, err := insta.call(ctx, &reqOptions{
-		Endpoint: urlActivitySeen,
-		IsPost:   true,
-		Query:    map[string]string{"_uuid": insta.uuid},
-	})
+	q, err := formOf(uuidForm{UUID: insta.uuid})
+	if err != nil {
+		return err
+	}
+	_, err = insta.call(ctx, &reqOptions{Endpoint: urlActivitySeen, IsPost: true, Query: q})
 	return err
+}
+
+type uuidForm struct {
+	UUID string `json:"_uuid"`
 }

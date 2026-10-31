@@ -29,20 +29,32 @@ type gqlQuery struct {
 	purpose  string // "fetch", "refresh" or "prefetch"; "" omits it, as list and search queries do
 }
 
-func (insta *Instagram) graphQL(ctx context.Context, gq gqlQuery, vars map[string]any) ([]byte, error) {
+type graphQLForm struct {
+	ClientDocID      string `json:"client_doc_id"`
+	FriendlyName     string `json:"fb_api_req_friendly_name"`
+	Format           string `json:"format"`
+	Locale           string `json:"locale"`
+	Method           string `json:"method"`
+	ServerTimestamps string `json:"server_timestamps"`
+	Variables        string `json:"variables"`
+	Purpose          string `json:"purpose,omitempty"`
+}
+
+func (insta *Instagram) graphQL(ctx context.Context, gq gqlQuery, vars any) ([]byte, error) {
 	url := cmp.Or(gq.url, graphQLURL)
 	v, err := json.Marshal(vars)
 	if err != nil {
 		return nil, err
 	}
-	form := map[string]string{
-		"client_doc_id":            gq.docID,
-		"fb_api_req_friendly_name": gq.friendly,
-		"format":                   "json",
-		"locale":                   "user",
-		"method":                   "post",
-		"server_timestamps":        "true",
-		"variables":                string(v),
+	req := graphQLForm{
+		ClientDocID:      gq.docID,
+		FriendlyName:     gq.friendly,
+		Format:           "json",
+		Locale:           "user",
+		Method:           "post",
+		ServerTimestamps: "true",
+		Variables:        string(v),
+		Purpose:          gq.purpose,
 	}
 	headers := map[string]string{
 		"Content-Type":                      "application/x-www-form-urlencoded",
@@ -53,9 +65,12 @@ func (insta *Instagram) graphQL(ctx context.Context, gq gqlQuery, vars map[strin
 	}
 	tagPurpose := "none"
 	if gq.purpose != "" {
-		form["purpose"] = gq.purpose
 		headers["X-Graphql-Request-Purpose"] = gq.purpose
 		tagPurpose = gq.purpose
+	}
+	form, err := formOf(req)
+	if err != nil {
+		return nil, err
 	}
 	headers["X-Fb-Request-Analytics-Tags"] = `{"network_tags":{"product":"` + insta.sess.AppID +
 		`","request_category":"graphql","purpose":"` + tagPurpose + `","retry_attempt":"0"}}`
@@ -184,12 +199,11 @@ func (user *User) Posts() *Pager[*Item] {
 	var maxID, cursor string
 	var pos int
 	return newPager(func(ctx context.Context) ([]*Item, string, error) {
-		vars := profileTimelineVars(user.ID)
+		vars := newProfileTimelineVars(user.ID)
 		if maxID != "" {
-			vars["max_id"] = maxID
-			vars["profile_grid_items_cursor"] = cursor
-			vars["pinned_profile_grid_items_ids"] = ""
-			vars["request_media_chunk"] = false
+			pinned := ""
+			vars.MaxID, vars.ProfileGridItemsCursor, vars.PinnedProfileGridItemsIDs = &maxID, &cursor, &pinned
+			vars.RequestMediaChunk = false
 		}
 		body, err := user.insta.graphQL(ctx, gqlQuery{friendly: "IGProfileTimelineQuery", docID: docProfileTimeline,
 			root: "xdt_api__v1__profile_timeline", purpose: "fetch"}, vars)
@@ -209,24 +223,61 @@ func (user *User) Posts() *Pager[*Item] {
 	})
 }
 
-func profileTimelineVars(id Int64) map[string]any {
-	return map[string]any{
-		"request_media_chunk": true, "request_hints_chunk": true, "defer_hints_chunk": true,
-		"skip_ig_play_count": false, "enable_carousel_media_count_in_deferred": false,
-		"skip_clips_captions_fields": false, "num_previews_for_associated_highlights": 3,
-		"enable_profile_fm_integration": false, "include_profile_grid_rendering_option": false,
-		"count": 12, "include_fb_mentioned_users": true, "include_associated_highlights": false,
-		"include_media_notes_fields": false, "include_accessibility_caption_for_carousel": false,
-		"include_eligible_insights_entrypoints": true, "include_videos_for_associated_highlights": false,
-		"exclude_user": true, "exclude_collaborative_posts": false,
-		"include_is_photo_comments_composer_enabled_for_author": false,
-		"initial_count_carousel_media":                          1, "fetch_profile_grid_items": true,
-		"include_horizon_attribution_info": false, "force_compute_user_tags": false,
-		"exclude_pinned_posts": false, "include_ring_creator_fields": false, "exclude_highlights": false,
-		"include_is_unseen_by_viewer": false, "include_timeline_ordered_edge": false,
-		"exclude_besties_content": false, "user_id": id.String(),
-		"include_hidden_feed_product_tags": false, "enabled_featured_pin_user_ids": false,
-		"exclude_comment": "true", "include_hidden_reel_product_tags": false,
+// profileTimelineVars: the pointer fields are set, possibly to "", on later pages only.
+type profileTimelineVars struct {
+	RequestMediaChunk                              bool    `json:"request_media_chunk"`
+	RequestHintsChunk                              bool    `json:"request_hints_chunk"`
+	DeferHintsChunk                                bool    `json:"defer_hints_chunk"`
+	SkipIgPlayCount                                bool    `json:"skip_ig_play_count"`
+	EnableCarouselMediaCountInDeferred             bool    `json:"enable_carousel_media_count_in_deferred"`
+	SkipClipsCaptionsFields                        bool    `json:"skip_clips_captions_fields"`
+	NumPreviewsForAssociatedHighlights             int     `json:"num_previews_for_associated_highlights"`
+	EnableProfileFmIntegration                     bool    `json:"enable_profile_fm_integration"`
+	IncludeProfileGridRenderingOption              bool    `json:"include_profile_grid_rendering_option"`
+	Count                                          int     `json:"count"`
+	IncludeFbMentionedUsers                        bool    `json:"include_fb_mentioned_users"`
+	IncludeAssociatedHighlights                    bool    `json:"include_associated_highlights"`
+	IncludeMediaNotesFields                        bool    `json:"include_media_notes_fields"`
+	IncludeAccessibilityCaptionForCarousel         bool    `json:"include_accessibility_caption_for_carousel"`
+	IncludeEligibleInsightsEntrypoints             bool    `json:"include_eligible_insights_entrypoints"`
+	IncludeVideosForAssociatedHighlights           bool    `json:"include_videos_for_associated_highlights"`
+	ExcludeUser                                    bool    `json:"exclude_user"`
+	ExcludeCollaborativePosts                      bool    `json:"exclude_collaborative_posts"`
+	IncludeIsPhotoCommentsComposerEnabledForAuthor bool    `json:"include_is_photo_comments_composer_enabled_for_author"`
+	InitialCountCarouselMedia                      int     `json:"initial_count_carousel_media"`
+	FetchProfileGridItems                          bool    `json:"fetch_profile_grid_items"`
+	IncludeHorizonAttributionInfo                  bool    `json:"include_horizon_attribution_info"`
+	ForceComputeUserTags                           bool    `json:"force_compute_user_tags"`
+	ExcludePinnedPosts                             bool    `json:"exclude_pinned_posts"`
+	IncludeRingCreatorFields                       bool    `json:"include_ring_creator_fields"`
+	ExcludeHighlights                              bool    `json:"exclude_highlights"`
+	IncludeIsUnseenByViewer                        bool    `json:"include_is_unseen_by_viewer"`
+	IncludeTimelineOrderedEdge                     bool    `json:"include_timeline_ordered_edge"`
+	ExcludeBestiesContent                          bool    `json:"exclude_besties_content"`
+	UserID                                         string  `json:"user_id"`
+	IncludeHiddenFeedProductTags                   bool    `json:"include_hidden_feed_product_tags"`
+	EnabledFeaturedPinUserIDs                      bool    `json:"enabled_featured_pin_user_ids"`
+	ExcludeComment                                 string  `json:"exclude_comment"`
+	IncludeHiddenReelProductTags                   bool    `json:"include_hidden_reel_product_tags"`
+	MaxID                                          *string `json:"max_id,omitempty"`
+	ProfileGridItemsCursor                         *string `json:"profile_grid_items_cursor,omitempty"`
+	PinnedProfileGridItemsIDs                      *string `json:"pinned_profile_grid_items_ids,omitempty"`
+}
+
+func newProfileTimelineVars(id Int64) profileTimelineVars {
+	return profileTimelineVars{
+		RequestMediaChunk:                  true,
+		RequestHintsChunk:                  true,
+		DeferHintsChunk:                    true,
+		NumPreviewsForAssociatedHighlights: 3,
+		Count:                              12,
+		IncludeFbMentionedUsers:            true,
+		IncludeEligibleInsightsEntrypoints: true,
+		ExcludeUser:                        true,
+		InitialCountCarouselMedia:          1,
+		FetchProfileGridItems:              true,
+		UserID:                             id.String(),
+		ExcludeComment:                     "true",
 	}
 }
 

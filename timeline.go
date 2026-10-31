@@ -78,31 +78,56 @@ func (tl *Timeline) Refresh(ctx context.Context) error {
 	return nil
 }
 
+type timelineRequest struct {
+	UUID                        string `json:"_uuid"`
+	DeviceID                    string `json:"device_id"`
+	PhoneID                     string `json:"phone_id"`
+	BloksVersioningID           string `json:"bloks_versioning_id"`
+	TimezoneOffset              string `json:"timezone_offset"`
+	DeviceTimezoneName          string `json:"device_timezone_name"`
+	ClientRecordedRequestTimeMs string `json:"client_recorded_request_time_ms"`
+	RequestID                   string `json:"request_id"`
+	SessionID                   string `json:"session_id"`
+	Reason                      string `json:"reason"`
+	IsPullToRefresh             string `json:"is_pull_to_refresh"`
+	IsNonFeedSurface            string `json:"is_non_feed_surface"`
+	FeedViewInfo                string `json:"feed_view_info"`
+	ClientSeenStoreMediaList    string `json:"client_seen_store_media_list"`
+	BatteryLevel                string `json:"battery_level"`
+	IsCharging                  string `json:"is_charging"`
+	IsDarkMode                  string `json:"is_dark_mode"`
+	WillSoundOn                 string `json:"will_sound_on"`
+	HasCameraPermission         string `json:"has_camera_permission"`
+	PushDisabled                string `json:"push_disabled"`
+	IncludeAttributionUIData    string `json:"include_attribution_ui_data"`
+	MaxID                       string `json:"max_id,omitempty"`
+	PaginationSource            string `json:"pagination_source,omitempty"`
+}
+
 func (tl *Timeline) fetch(ctx context.Context, reason string) ([]*Item, string, error) {
 	insta := tl.insta
 	now := time.Now()
-	q := map[string]string{
-		"_uuid":                           insta.uuid,
-		"device_id":                       insta.uuid,
-		"phone_id":                        insta.fID,
-		"bloks_versioning_id":             insta.sess.BloksVersionID,
-		"timezone_offset":                 insta.sess.TimezoneOffset,
-		"device_timezone_name":            insta.sess.TimezoneName,
-		"client_recorded_request_time_ms": strconv.FormatInt(now.UnixMilli(), 10),
-		"request_id":                      generateUUID(),
-		"session_id":                      insta.feedSessionID,
-		"reason":                          reason,
-		"is_pull_to_refresh":              "0",
-		"is_non_feed_surface":             "0",
-		"feed_view_info":                  "[]",
-		"client_seen_store_media_list":    "",
-		"battery_level":                   strconv.Itoa(60 + rand.IntN(40)),
-		"is_charging":                     "1",
-		"is_dark_mode":                    "1",
-		"will_sound_on":                   "0",
-		"has_camera_permission":           "1",
-		"push_disabled":                   "true",
-		"include_attribution_ui_data":     "true",
+	req := timelineRequest{
+		UUID:                        insta.uuid,
+		DeviceID:                    insta.uuid,
+		PhoneID:                     insta.fID,
+		BloksVersioningID:           insta.sess.BloksVersionID,
+		TimezoneOffset:              insta.sess.TimezoneOffset,
+		DeviceTimezoneName:          insta.sess.TimezoneName,
+		ClientRecordedRequestTimeMs: strconv.FormatInt(now.UnixMilli(), 10),
+		RequestID:                   generateUUID(),
+		SessionID:                   insta.feedSessionID,
+		Reason:                      reason,
+		IsPullToRefresh:             "0",
+		IsNonFeedSurface:            "0",
+		FeedViewInfo:                "[]",
+		BatteryLevel:                strconv.Itoa(60 + rand.IntN(40)),
+		IsCharging:                  "1",
+		IsDarkMode:                  "1",
+		WillSoundOn:                 "0",
+		HasCameraPermission:         "1",
+		PushDisabled:                "true",
+		IncludeAttributionUIData:    "true",
 	}
 	friendly := "IgApi: feed/timeline/"
 	tail := "false"
@@ -115,16 +140,19 @@ func (tl *Timeline) fetch(ctx context.Context, reason string) ([]*Item, string, 
 	}
 	switch reason {
 	case "pagination":
-		q["max_id"] = tl.nextID
-		q["pagination_source"] = "feed_recs"
+		req.MaxID, req.PaginationSource = tl.nextID, "feed_recs"
 		friendly += "_tail"
 		tail = "true"
 	case "auto_refresh":
-		q["is_pull_to_refresh"] = "1"
+		req.IsPullToRefresh = "1"
 	default:
 		headers["X-Ig-Accept-Hint"] = "feed"
 	}
 	headers["X-Ig-Tail-Load-Request"] = tail
+	q, err := formOf(req)
+	if err != nil {
+		return nil, "", err
+	}
 
 	body, err := insta.call(ctx, &reqOptions{
 		Endpoint:     urlTimeline,
@@ -169,22 +197,36 @@ const (
 	TrayPullToRefresh TrayReason = "pull_to_refresh"
 )
 
+type trayRequest struct {
+	UUID                     string `json:"_uuid"`
+	PageSize                 string `json:"page_size"`
+	Reason                   string `json:"reason"`
+	RequestID                string `json:"request_id"`
+	TimezoneOffset           string `json:"timezone_offset"`
+	TraySessionID            string `json:"tray_session_id"`
+	SupportedCapabilitiesNew string `json:"supported_capabilities_new,omitempty"`
+}
+
 // StoryTray loads the stories tray. Reels further down arrive without items;
 // LoadReels fills them in batches.
 func (insta *Instagram) StoryTray(ctx context.Context, reason TrayReason) (*Tray, error) {
-	q := map[string]string{
-		"_uuid":           insta.uuid,
-		"page_size":       "50",
-		"reason":          string(reason),
-		"request_id":      generateUUID(),
-		"timezone_offset": insta.sess.TimezoneOffset,
-		"tray_session_id": generateUUID(),
+	req := trayRequest{
+		UUID:           insta.uuid,
+		PageSize:       "50",
+		Reason:         string(reason),
+		RequestID:      generateUUID(),
+		TimezoneOffset: insta.sess.TimezoneOffset,
+		TraySessionID:  generateUUID(),
 	}
 	if reason != TrayColdStart {
-		q["supported_capabilities_new"] = supportedCapabilities
+		req.SupportedCapabilitiesNew = supportedCapabilities
+	}
+	q, err := formOf(req)
+	if err != nil {
+		return nil, err
 	}
 	tray := &Tray{}
-	err := insta.callJSON(ctx, &reqOptions{
+	err = insta.callJSON(ctx, &reqOptions{
 		Endpoint:     urlStories,
 		IsPost:       true,
 		Stream:       true,

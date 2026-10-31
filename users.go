@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
-	"strconv"
 )
 
 type User struct {
@@ -221,13 +219,17 @@ func (user *User) Info(ctx context.Context) error {
 }
 
 func (user *User) Sync(ctx context.Context) error {
+	q, err := formOf(user.infoStreamQuery())
+	if err != nil {
+		return err
+	}
 	body, err := user.insta.call(ctx, &reqOptions{
 		Endpoint:     fmt.Sprintf(urlUserInfoStream, user.ID),
 		FriendlyName: "IgApi: user_info_stream_by_id",
 		IsPost:       true,
 		Stream:       true,
 		Priority:     "u=0",
-		Query:        user.infoStreamQuery(),
+		Query:        q,
 		ExtraHeaders: map[string]string{"X-Ig-Accept-Hint": "image-grid"},
 	})
 	if err != nil {
@@ -236,18 +238,23 @@ func (user *User) Sync(ctx context.Context) error {
 	return user.unmarshal(body)
 }
 
-func (user *User) infoStreamQuery() map[string]string {
-	q := map[string]string{
-		"_uuid":         user.insta.uuid,
-		"push_disabled": "true",
-	}
+type infoStreamQuery struct {
+	UUID         string `json:"_uuid"`
+	PushDisabled string `json:"push_disabled"`
+	EntryPoint   string `json:"entry_point"`
+	FromModule   string `json:"from_module,omitempty"`
+	Module       string `json:"module,omitempty"`
+}
+
+func (user *User) infoStreamQuery() infoStreamQuery {
+	q := infoStreamQuery{UUID: user.insta.uuid, PushDisabled: "true"}
 	switch {
 	case int64(user.ID) == user.insta.userID():
-		q["entry_point"], q["from_module"] = "self_profile", "self_profile"
+		q.EntryPoint, q.FromModule = "self_profile", "self_profile"
 	case user.entry != (entryContext{}):
-		q["entry_point"], q["module"] = user.entry.entryPoint, user.entry.module
+		q.EntryPoint, q.Module = user.entry.entryPoint, user.entry.module
 	default:
-		q["entry_point"], q["module"] = "feed_story_header", "feed_timeline"
+		q.EntryPoint, q.Module = "feed_story_header", "feed_timeline"
 	}
 	return q
 }
@@ -264,30 +271,33 @@ func (user *User) unmarshal(body []byte) error {
 	return nil
 }
 
-func (user *User) friendshipPayload(extra map[string]string) map[string]string {
-	p := map[string]string{
-		"user_id":                       user.ID.String(),
-		"radio_type":                    "ethernet-none",
-		"_uid":                          strconv.FormatInt(user.insta.userID(), 10),
-		"_uuid":                         user.insta.uuid,
-		"include_follow_friction_check": "1",
-		"container_module":              "profile",
-	}
-	maps.Copy(p, extra)
-	return p
+type friendshipRequest struct {
+	sessionIDs
+	UserID                     string `json:"user_id"`
+	RadioType                  string `json:"radio_type"`
+	IncludeFollowFrictionCheck string `json:"include_follow_friction_check"`
+	ContainerModule            string `json:"container_module"`
+	DeviceID                   string `json:"device_id,omitempty"`
 }
 
 // Follow updates user.Friendship; for a private account it becomes an outgoing request.
 func (user *User) Follow(ctx context.Context) error {
-	return user.changeFriendship(ctx, urlUserFollow, map[string]string{"device_id": user.insta.dID})
+	return user.changeFriendship(ctx, urlUserFollow, user.insta.dID)
 }
 
 func (user *User) Unfollow(ctx context.Context) error {
-	return user.changeFriendship(ctx, urlUserUnfollow, nil)
+	return user.changeFriendship(ctx, urlUserUnfollow, "")
 }
 
-func (user *User) changeFriendship(ctx context.Context, endpoint string, extra map[string]string) error {
-	q, err := signedBody(user.friendshipPayload(extra))
+func (user *User) changeFriendship(ctx context.Context, endpoint, deviceID string) error {
+	q, err := signedBody(friendshipRequest{
+		sessionIDs:                 user.insta.sessionIDs(),
+		UserID:                     user.ID.String(),
+		RadioType:                  "ethernet-none",
+		IncludeFollowFrictionCheck: "1",
+		ContainerModule:            "profile",
+		DeviceID:                   deviceID,
+	})
 	if err != nil {
 		return err
 	}
@@ -299,15 +309,31 @@ func (user *User) changeFriendship(ctx context.Context, endpoint string, extra m
 	return nil
 }
 
+type friendshipShowQuery struct {
+	IsExternalDeeplinkProfileView string `json:"is_external_deeplink_profile_view"`
+}
+
 func (user *User) LoadFriendship(ctx context.Context) (*Friendship, error) {
-	err := user.insta.callJSON(ctx, &reqOptions{
-		Endpoint: fmt.Sprintf(urlFriendship, user.ID),
-		Query:    map[string]string{"is_external_deeplink_profile_view": "false"},
-	}, &user.Friendship)
+	q, err := formOf(friendshipShowQuery{IsExternalDeeplinkProfileView: "false"})
+	if err != nil {
+		return nil, err
+	}
+	err = user.insta.callJSON(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlFriendship, user.ID), Query: q}, &user.Friendship)
 	if err != nil {
 		return nil, err
 	}
 	return &user.Friendship, nil
+}
+
+type chainingQuery struct {
+	ConsumptionSurface    string `json:"consumption_surface"`
+	EligibleForThreadsCTA string `json:"eligible_for_threads_cta"`
+	FromModule            string `json:"from_module"`
+	Module                string `json:"module"`
+	ProfileChainingCheck  string `json:"profile_chaining_check"`
+	RequestEntryPoint     string `json:"request_entry_point"`
+	TargetID              string `json:"target_id"`
+	TargetUsername        string `json:"target_username"`
 }
 
 // SuggestedUsers is the "similar accounts" carousel shown on a profile.
@@ -315,19 +341,20 @@ func (user *User) SuggestedUsers(ctx context.Context) ([]*User, error) {
 	var resp struct {
 		Users []*User `json:"users"`
 	}
-	err := user.insta.callJSON(ctx, &reqOptions{
-		Endpoint: urlDiscoverChaining,
-		Query: map[string]string{
-			"consumption_surface":      "profile_hscroll",
-			"eligible_for_threads_cta": "false",
-			"from_module":              "feed_timeline",
-			"module":                   "profile",
-			"profile_chaining_check":   "true",
-			"request_entry_point":      "profile_auto_expand",
-			"target_id":                user.ID.String(),
-			"target_username":          user.Username,
-		},
-	}, &resp)
+	q, err := formOf(chainingQuery{
+		ConsumptionSurface:    "profile_hscroll",
+		EligibleForThreadsCTA: "false",
+		FromModule:            "feed_timeline",
+		Module:                "profile",
+		ProfileChainingCheck:  "true",
+		RequestEntryPoint:     "profile_auto_expand",
+		TargetID:              user.ID.String(),
+		TargetUsername:        user.Username,
+	})
+	if err != nil {
+		return nil, err
+	}
+	err = user.insta.callJSON(ctx, &reqOptions{Endpoint: urlDiscoverChaining, Query: q}, &resp)
 	if err != nil {
 		return nil, err
 	}
