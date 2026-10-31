@@ -11,10 +11,6 @@ import (
 const (
 	urlStoryViewers = "media/%s/list_reel_media_viewer/"
 
-	docReelInsights      = "34117726174753558798011202277"
-	rootReelInsights     = "ig_reel_insights"
-	friendlyReelInsights = "ReelInsightsQuery"
-
 	docLongformInsights      = "142319532318085841412086369996"
 	friendlyLongformInsights = "LongformInsightsQuery"
 
@@ -29,43 +25,61 @@ const (
 	friendlySetCommentInsightsOptIn = "IGCommentInsightsOptinStatusMutation"
 )
 
-// ReelInsights are a Reel's metrics. The fields shared with posts are decoded;
-// Raw holds the whole ig_reel_insights object.
-type ReelInsights struct {
-	Insights
-	Raw json.RawMessage `json:"-"`
+// Metric is one labelled insights figure as the app shows it; Value stays nil
+// until Instagram has data.
+type Metric struct {
+	ID             string          `json:"id"`
+	Label          string          `json:"label"`
+	Format         string          `json:"format"` // COUNT, PERCENTAGE, DURATION_SECONDS
+	FormattedValue string          `json:"formatted_value"`
+	Value          *float64        `json:"value"`
+	Benchmark      json.RawMessage `json:"benchmark"`
 }
 
-// ReelInsights loads the Reel's metrics; same variables as the post query.
-func (item *Item) ReelInsights(ctx context.Context) (*ReelInsights, error) {
-	var raw json.RawMessage
-	err := item.insta.graphQLRoot(ctx, gqlQuery{
-		url:      graphQLWWWURL,
-		friendly: friendlyReelInsights,
-		docID:    docReelInsights,
-		root:     rootReelInsights,
-	}, postInsightsVars{MediaIGID: item.pk(), BloksVersioningID: item.insta.sess.BloksVersionID}, &raw)
-	if err != nil {
-		return nil, err
-	}
-	in := &ReelInsights{Raw: raw}
-	if err := json.Unmarshal(raw, &in.Insights); err != nil {
-		return nil, err
-	}
-	return in, nil
+// ReelInsights are the metrics of a Reel or long-form video.
+type ReelInsights struct {
+	MediaFBID          string   `json:"media_id"`
+	Views              Metric   `json:"total_nullable_views"`
+	TotalViews         Metric   `json:"aggregated_total_views"`
+	Viewers            Metric   `json:"viewers_or_reach"`
+	AvgWatchTime       Metric   `json:"avg_watch_time"`
+	Follows            Metric   `json:"aggregated_follows"`
+	PerformanceFactors []Metric `json:"performance_factors"` // skip rate and others
+	Likes              int      `json:"likes"`
+	Comments           int      `json:"comments"`
+	Saves              int      `json:"saves"`
+	Reposts            int      `json:"reposts"`
+	Shares             *int     `json:"shares"`
+	FollowersViews     int      `json:"followers_views"`
+	NonFollowersViews  int      `json:"non_followers_views"`
+	// ViewsOverTime holds all/followers/non_followers series and media_created_at.
+	ViewsOverTime json.RawMessage `json:"views_over_time"`
+	Demographics  json.RawMessage `json:"demographics"`
+	LinkedReels   json.RawMessage `json:"linked_reels"`
+	ThumbnailURL  string          `json:"thumbnail_url"`
 }
 
 type mediaIGIDVars struct {
 	MediaIGID string `json:"mediaIgid"`
 }
 
-// LongformInsights loads the metrics of a long-form video as the raw root object.
-func (item *Item) LongformInsights(ctx context.Context) (json.RawMessage, error) {
-	return item.insta.graphQLOnlyRoot(ctx, gqlQuery{
+// ReelInsights loads a Reel's metrics. It runs the app's LongformInsightsQuery,
+// which serves Reels; its ReelInsightsQuery needs variables the decompiled app
+// does not name.
+func (item *Item) ReelInsights(ctx context.Context) (*ReelInsights, error) {
+	raw, err := item.insta.graphQLOnlyRoot(ctx, gqlQuery{
 		url:      graphQLWWWURL,
 		friendly: friendlyLongformInsights,
 		docID:    docLongformInsights,
 	}, mediaIGIDVars{MediaIGID: item.pk()})
+	if err != nil {
+		return nil, err
+	}
+	var in ReelInsights
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return nil, err
+	}
+	return &in, nil
 }
 
 // MediaProduct selects the kind of media in MediaInsightsGrid.
@@ -94,28 +108,57 @@ type mediaGridVars struct {
 	CallerID                     string               `json:"caller_id"`
 }
 
-// MediaInsightsGrid loads one page (15 items) of the account's media of one kind
-// with their reach, as the raw root object; cursor is "" for the first page.
-// Stories cover the last day, other kinds their lifetime.
-func (account *Account) MediaInsightsGrid(ctx context.Context, product MediaProduct, cursor string) (json.RawMessage, error) {
+// MediaInsightsGrid pages through the account's media of one kind with their
+// reach (15 per page); each item is the raw media node. Stories cover the last
+// day, other kinds their lifetime.
+func (account *Account) MediaInsightsGrid(product MediaProduct) *Pager[json.RawMessage] {
 	timeframe := "LIFETIME"
 	if product == MediaProductStory {
 		timeframe = "ONE_DAY"
 	}
-	return account.insta.graphQLOnlyRoot(ctx, gqlQuery{
-		url:      graphQLWWWURL,
-		friendly: friendlyMediaInsightsGrid,
-		docID:    docMediaInsightsGrid,
-	}, mediaGridVars{
-		QueryParams:                  mediaGridQueryParams{ID: strconv.FormatInt(account.insta.userID(), 10)},
-		Count:                        15,
-		Timeframe:                    timeframe,
-		Metric:                       "MEDIA_ORGANIC_ACCOUNT_REACH_OR_PROMOTED_PEOPLE_BASED_REACH",
-		ShouldIncludeInsightsData:    true,
-		ShowOnlyIGBoostEligibleMedia: true,
-		MediaProductType:             product,
-		Cursor:                       cursor,
-		CallerID:                     "BOOST_MEDIA_PICKER",
+	var cursor string
+	return newPager(func(ctx context.Context) ([]json.RawMessage, string, error) {
+		raw, err := account.insta.graphQLOnlyRoot(ctx, gqlQuery{
+			url:      graphQLWWWURL,
+			friendly: friendlyMediaInsightsGrid,
+			docID:    docMediaInsightsGrid,
+		}, mediaGridVars{
+			QueryParams:                  mediaGridQueryParams{ID: strconv.FormatInt(account.insta.userID(), 10)},
+			Count:                        15,
+			Timeframe:                    timeframe,
+			Metric:                       "MEDIA_ORGANIC_ACCOUNT_REACH_OR_PROMOTED_PEOPLE_BASED_REACH",
+			ShouldIncludeInsightsData:    true,
+			ShowOnlyIGBoostEligibleMedia: true,
+			MediaProductType:             product,
+			Cursor:                       cursor,
+			CallerID:                     "BOOST_MEDIA_PICKER",
+		})
+		if err != nil {
+			return nil, "", err
+		}
+		var page struct {
+			BusinessManager struct {
+				Medias struct {
+					Edges []struct {
+						Node json.RawMessage `json:"node"`
+					} `json:"edges"`
+					PageInfo struct {
+						HasNextPage bool   `json:"has_next_page"`
+						EndCursor   string `json:"end_cursor"`
+					} `json:"page_info"`
+				} `json:"medias"`
+			} `json:"business_manager"`
+		}
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return nil, "", err
+		}
+		m := page.BusinessManager.Medias
+		items := make([]json.RawMessage, len(m.Edges))
+		for i, e := range m.Edges {
+			items[i] = e.Node
+		}
+		cursor = m.PageInfo.EndCursor
+		return items, cursorIf(m.PageInfo.HasNextPage, cursor), nil
 	})
 }
 

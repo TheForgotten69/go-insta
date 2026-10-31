@@ -81,6 +81,13 @@ with many options a field reference like `docs/reel-fields.md`.
 | `0214.A0Q(b, key, s)` | `AQR`, then build |
 | `0220.A0M(session)` | a new POST |
 
+### Response field names
+
+GraphQL parsers (Pando models) read each field by the Java `String.hashCode()` of its
+name, so the decompiled parser shows numbers (`case 3599307:`), not names. Hash the
+dex strings until one matches (`3599307` is `user`), or read the field names off one
+live response.
+
 ### What only the live API tells you
 
 - **Signed body or plain form**: decided in a method jadx cannot decompile. Start with

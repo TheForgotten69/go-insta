@@ -3,69 +3,68 @@ package goinsta
 import (
 	"errors"
 	"reflect"
-	"strings"
+	"strconv"
 	"testing"
 )
 
-func TestReelAndLongformInsights(t *testing.T) {
-	insta, _ := newReplay(t)
-	got := capture(t, insta, func(s sent) (int, string) {
-		if s.payload["fb_api_req_friendly_name"] == friendlyReelInsights {
-			return 200, `{"data":{"__typename":"Query","ig_reel_insights":{"likes":3,"total_views":40,"ig_plays":41}}}`
-		}
-		return 200, `{"data":{"__typename":"Query","longform_insights_info":{"plays":5}}}`
-	})
-	item := testItem(insta, "4019685539559466739_42865264907")
+// The response is the live LongformInsightsQuery answer for a fresh Reel (2026-10-31).
+const longformInsightsBody = `{"data":{"__typename":"Query","longform_insights_info":{"aggregated_follows":{"benchmark":null,"format":"COUNT","formatted_value":"0","id":"longform_aggregated_follows","label":"Follows","value":null},"aggregated_total_views":{"benchmark":null,"format":"COUNT","formatted_value":"0","id":"longform_aggregated_unified_total_views","label":"Total views","value":0},"avg_watch_time":{"format":"DURATION_SECONDS","formatted_value":"--","id":"avg_watch_time","label":"Average watch time","value":null},"comments":0,"demographics":null,"engagement_comments":0,"engagement_likes":0,"engagement_reposts":0,"engagement_saves":0,"engagement_shares":null,"followers_views":0,"follows":null,"likes":0,"linked_reels":[],"media_id":"17966887134201144","non_followers_views":0,"performance_factors":[{"benchmark":null,"format":"PERCENTAGE","formatted_value":"0.0%","id":"reels_skip_rate","label":"Skip rate","value":0},{"benchmark":null,"format":"PERCENTAGE","formatted_value":"0.0%","id":"reshares_rate","label":"Share rate","value":0}],"reposts":0,"saves":0,"shares":null,"thumbnail_url":"https://example/thumb.jpg","total_nullable_views":{"format":"COUNT","formatted_value":"0","id":"views","label":"Views","value":0},"viewers_or_reach":{"format":"COUNT","formatted_value":"--","id":"viewers","label":"Viewers","value":null},"views_over_time":{"all":{"benchmark":[],"current":[],"middle":[]},"followers":{"benchmark":[],"current":[],"middle":[]},"media_created_at":1793411691,"non_followers":{"benchmark":[],"current":[],"middle":[]}}}}}`
 
-	in, err := item.ReelInsights(t.Context())
+func TestReelInsights(t *testing.T) {
+	insta, _ := newReplay(t)
+	got := capture(t, insta, answer(longformInsightsBody))
+	in, err := testItem(insta, "4019685539559466739_42865264907").ReelInsights(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := (*got)[0]
-	if r.req.URL.Path != "/graphql_www" || r.payload["client_doc_id"] != docReelInsights {
-		t.Errorf("reel insights request: %s %v", r.req.URL.Path, r.payload["client_doc_id"])
+	if r.req.URL.Path != "/graphql_www" || r.payload["client_doc_id"] != docLongformInsights {
+		t.Errorf("request: %s %v", r.req.URL.Path, r.payload["client_doc_id"])
 	}
-	if v := r.vars(); v["mediaIgid"] != "4019685539559466739" || v["bloksVersioningId"] != insta.sess.BloksVersionID {
-		t.Errorf("reel insights vars = %v", v)
+	if v := r.vars(); !reflect.DeepEqual(v, map[string]any{"mediaIgid": "4019685539559466739"}) {
+		t.Errorf("vars = %v", v)
 	}
-	if in.Likes != 3 || in.TotalViews != 40 || !strings.Contains(string(in.Raw), "ig_plays") {
-		t.Errorf("reel insights = %+v", in)
-	}
-
-	raw, err := item.LongformInsights(t.Context())
-	if err != nil || string(raw) != `{"plays":5}` {
-		t.Errorf("longform = %s, %v", raw, err)
-	}
-	if v := (*got)[1].vars(); !reflect.DeepEqual(v, map[string]any{"mediaIgid": "4019685539559466739"}) {
-		t.Errorf("longform vars = %v", v)
+	if in.AvgWatchTime.Label != "Average watch time" || in.AvgWatchTime.Format != "DURATION_SECONDS" ||
+		in.Views.Value == nil || len(in.PerformanceFactors) != 2 || in.PerformanceFactors[0].ID != "reels_skip_rate" {
+		t.Errorf("insights = %+v", in)
 	}
 }
 
 func TestMediaInsightsGrid(t *testing.T) {
 	insta, _ := newReplay(t)
-	got := capture(t, insta, answer(`{"data":{"xig_media_grid":{"edges":[]}}}`))
-	if _, err := insta.Account.MediaInsightsGrid(t.Context(), MediaProductStory, ""); err != nil {
-		t.Fatal(err)
+	page := func(node, cursor string, more bool) string {
+		return `{"data":{"__typename":"Query","xig_user":{"__typename":"XFBInstagramUserV2","business_manager":{"medias":{"edges":[{"node":` +
+			node + `}],"page_info":{"has_next_page":` + strconv.FormatBool(more) + `,"end_cursor":"` + cursor + `"}}}}}}`
 	}
-	if _, err := insta.Account.MediaInsightsGrid(t.Context(), MediaProductReels, "C1"); err != nil {
-		t.Fatal(err)
+	got := capture(t, insta, func(s sent) (int, string) {
+		if _, ok := s.vars()["cursor"]; ok {
+			return 200, page(`{"id":"2"}`, "", false)
+		}
+		return 200, page(`{"id":"1"}`, "C1", true)
+	})
+	items, err := insta.Account.MediaInsightsGrid(MediaProductStory).Collect(t.Context(), 0)
+	if err != nil || len(items) != 2 || string(items[1]) != `{"id":"2"}` {
+		t.Fatalf("items = %s, %v", items, err)
 	}
-	story, reels := (*got)[0].vars(), (*got)[1].vars()
-	qp, _ := story["query_params"].(map[string]any)
-	if qp["id"] != "42865264907" || qp["access_token"] != "" || story["timeframe"] != "ONE_DAY" ||
-		story["media_product_type"] != "STORY" || story["count"] != 15.0 || story["should_include_insights_data"] != true {
-		t.Errorf("story grid vars = %v", story)
+	first, second := (*got)[0].vars(), (*got)[1].vars()
+	qp, _ := first["query_params"].(map[string]any)
+	if qp["id"] != "42865264907" || qp["access_token"] != "" || first["timeframe"] != "ONE_DAY" ||
+		first["media_product_type"] != "STORY" || first["count"] != 15.0 || first["should_include_insights_data"] != true {
+		t.Errorf("first page vars = %v", first)
 	}
-	if _, ok := story["cursor"]; ok {
-		t.Error("first page sent a cursor")
+	if _, ok := first["cursor"]; ok || second["cursor"] != "C1" {
+		t.Errorf("cursors: first %v, second %v", first["cursor"], second["cursor"])
 	}
-	if reels["timeframe"] != "LIFETIME" || reels["media_product_type"] != "CLIPS" || reels["cursor"] != "C1" {
-		t.Errorf("reels grid vars = %v", reels)
+
+	reels := insta.Account.MediaInsightsGrid(MediaProductReels)
+	_ = reels.Next(t.Context())
+	if v := (*got)[2].vars(); v["timeframe"] != "LIFETIME" || v["media_product_type"] != "CLIPS" {
+		t.Errorf("reels vars = %v", v)
 	}
 
 	insta2, _ := newReplay(t)
 	capture(t, insta2, answer(`{"data":{"__typename":"Query"}}`))
-	if _, err := insta2.Account.MediaInsightsGrid(t.Context(), MediaProductFeed, ""); !errors.Is(err, ErrEmptyResponse) {
+	if err := insta2.Account.MediaInsightsGrid(MediaProductFeed).Next(t.Context()); !errors.Is(err, ErrEmptyResponse) {
 		t.Errorf("empty grid err = %v", err)
 	}
 }
@@ -126,5 +125,16 @@ func TestStoryViewers(t *testing.T) {
 	}
 	if second.req.URL.Query().Get("max_id") != "M2" {
 		t.Errorf("viewers page 2 query = %v", second.req.URL.Query())
+	}
+}
+
+func TestGraphQLTopLevelError(t *testing.T) {
+	insta, _ := newReplay(t)
+	capture(t, insta, answer(`{"errors":[{"message":"A server error missing_required_variable_value occured.","code":1675012,`+
+		`"summary":"Your Request Couldn't be Processed"}],"extensions":{"is_final":true}}`))
+	_, err := testItem(insta, "1_2").ReelInsights(t.Context())
+	var ge *GraphQLError
+	if !errors.As(err, &ge) || ge.Code != 1675012 {
+		t.Errorf("err = %v, want GraphQLError 1675012", err)
 	}
 }

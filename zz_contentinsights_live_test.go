@@ -37,20 +37,15 @@ func TestLiveContentInsights(t *testing.T) {
 	}
 	if reel != nil {
 		in, err := reel.ReelInsights(ctx)
-		if in != nil {
-			t.Logf("reel %s ReelInsights: err=%v raw=%.2000s", reel.ID, err, in.Raw)
-		} else {
-			t.Logf("reel %s ReelInsights: err=%v", reel.ID, err)
-		}
-		raw, err := reel.LongformInsights(ctx)
-		t.Logf("reel %s LongformInsights: err=%v raw=%.1500s", reel.ID, err, raw)
+		t.Logf("reel %s ReelInsights: err=%v %+v", reel.ID, err, in)
 	} else {
 		t.Log("no own Reel: post one (cmd/smoke -reel -keep) to read Reel insights")
 	}
 
 	for _, p := range []MediaProduct{MediaProductFeed, MediaProductStory, MediaProductReels} {
-		raw, err := insta.Account.MediaInsightsGrid(ctx, p, "")
-		t.Logf("MediaInsightsGrid %s: err=%v raw=%.1500s", p, err, raw)
+		grid := insta.Account.MediaInsightsGrid(p)
+		err := grid.Next(ctx)
+		t.Logf("MediaInsightsGrid %s: err=%v items=%d more=%v", p, err, len(grid.Items), grid.More())
 	}
 
 	on, err := insta.Account.CommentInsightsOptIn(ctx)

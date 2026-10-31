@@ -103,7 +103,18 @@ func (insta *Instagram) graphQL(ctx context.Context, gq gqlQuery, vars any) ([]b
 	if err != nil {
 		return nil, err
 	}
-	return mergeIncremental(body)
+	merged, err := mergeIncremental(body)
+	if err != nil {
+		return nil, err
+	}
+	var top struct {
+		Data   json.RawMessage `json:"data"`
+		Errors []GraphQLError  `json:"errors"`
+	}
+	if json.Unmarshal(merged, &top) == nil && len(top.Errors) > 0 && (len(top.Data) == 0 || string(top.Data) == "null") {
+		return nil, &top.Errors[0]
+	}
+	return merged, nil
 }
 
 // mergeIncremental folds a @defer/@stream response (NDJSON: a skeleton, then
