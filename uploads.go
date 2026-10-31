@@ -537,21 +537,19 @@ type StoryOptions struct {
 
 // UploadStory posts a JPEG or WebP image to the story.
 func (insta *Instagram) UploadStory(ctx context.Context, r io.Reader, opts StoryOptions) (*Item, error) {
+	if l := opts.LinkPost; l != nil && (l.pk() == "" || l.ownerID() == "") {
+		return nil, errors.New("story link: post has no pk or owner")
+	}
 	p, err := readPhoto(r)
 	if err != nil {
 		return nil, err
-	}
-	if opts.LinkPost != nil && opts.LinkPost.Pk == 0 {
-		return nil, errNoPostPk
 	}
 	if err := insta.uploadPhoto(ctx, p, "stories", ""); err != nil {
 		return nil, err
 	}
 	req := insta.storyBase(p)
 	if opts.LinkPost != nil {
-		if err := insta.addPostSticker(&req, opts.LinkPost, 1, 1); err != nil {
-			return nil, err
-		}
+		req.storySticker = linkPost(opts.LinkPost, 1, 1)
 	}
 	req.CaptureType = "normal"
 	req.CompositionID = generateUUID()
@@ -581,12 +579,17 @@ type storyConfigure struct {
 	CompositionID           string `json:"composition_id,omitempty"`
 	MediaTransformationInfo string `json:"media_transformation_info,omitempty"`
 
-	ResharedMediaID        string `json:"reshared_media_id,omitempty"`
+	storySticker
 	IsAutoResharingToStory string `json:"is_auto_resharing_to_story,omitempty"`
 	ImportedTakenAt        string `json:"imported_taken_at,omitempty"`
 	HasCameraMetadata      string `json:"has_camera_metadata,omitempty"`
 	HasOriginalSound       string `json:"has_original_sound,omitempty"`
-	TapModels              string `json:"tap_models,omitempty"`
+}
+
+// storySticker is sent together: the app adds reshared_media_id for any post sticker.
+type storySticker struct {
+	ResharedMediaID string                  `json:"reshared_media_id,omitempty"`
+	TapModels       jsonText[[]postSticker] `json:"tap_models,omitzero"`
 }
 
 func (insta *Instagram) storyBase(p *photo) storyConfigure {
@@ -625,30 +628,15 @@ type postSticker struct {
 	TapStateString string  `json:"tap_state_str_id"`
 }
 
-var errNoPostPk = errors.New("post sticker: post has no pk")
-
-// w and h are fractions of the frame.
-func (insta *Instagram) addPostSticker(req *storyConfigure, post *Item, w, h float64) error {
-	if post.Pk == 0 {
-		return errNoPostPk
-	}
-	pk := strconv.FormatInt(int64(post.Pk), 10)
-	owner := int64(post.User.ID)
-	if owner == 0 {
-		owner = insta.userID()
-	}
-	// The app sends product_type carousel_container for every post sticker.
-	tap, err := json.Marshal([]postSticker{{
+// linkPost centers a w x h post sticker, in fractions of the frame. The app
+// sends product_type carousel_container for every post sticker.
+func linkPost(post *Item, w, h float64) storySticker {
+	pk := post.pk()
+	return storySticker{ResharedMediaID: pk, TapModels: jsonText[[]postSticker]{[]postSticker{{
 		X: 0.5, Y: 0.5, Width: w, Height: h,
-		Type: "feed_media", MediaID: pk, MediaOwnerID: strconv.FormatInt(owner, 10),
+		Type: "feed_media", MediaID: pk, MediaOwnerID: post.ownerID(),
 		ProductType: "carousel_container", IsSticker: true, TapStateString: "feed_post_sticker_square",
-	}})
-	if err != nil {
-		return err
-	}
-	req.ResharedMediaID = pk
-	req.TapModels = string(tap)
-	return nil
+	}}}}
 }
 
 func (insta *Instagram) reshareToStory(ctx context.Context, post *Item, card *storyCard) error {
@@ -657,9 +645,7 @@ func (insta *Instagram) reshareToStory(ctx context.Context, post *Item, card *st
 		return err
 	}
 	req := insta.storyBase(p)
-	if err := insta.addPostSticker(&req, post, card.w, card.h); err != nil {
-		return err
-	}
+	req.storySticker = linkPost(post, card.w, card.h)
 	req.CaptureType = "unknown"
 	req.CameraSessionID = ""
 	req.SourceType = "feed_reshare"

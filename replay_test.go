@@ -1035,12 +1035,17 @@ func TestUploadStory(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkRequest(t, fixture(t, "rupload_story"), r.sent[0])
-	// The story was captured in the earlier session, before configure moved to the media_upload priority.
+	checkRequest(t, configureStoryFixture(t), r.sent[1])
+}
+
+// configureStoryFixture is configure_story with the headers of the later
+// capture: the story predates configure's media_upload priority.
+func configureStoryFixture(t *testing.T) httplog.Entry {
 	f := fixture(t, "configure_story")
 	for _, k := range []string{"priority", "x-fb-request-analytics-tags"} {
 		f.ReqHeaders[k] = fixture(t, "configure").ReqHeaders[k]
 	}
-	checkRequest(t, f, r.sent[1])
+	return f
 }
 
 func TestUploadStoryLinkPost(t *testing.T) {
@@ -1049,11 +1054,7 @@ func TestUploadStoryLinkPost(t *testing.T) {
 	if _, err := insta.UploadStory(t.Context(), testJPEG(t, 1080, 1920), StoryOptions{LinkPost: post}); err != nil {
 		t.Fatal(err)
 	}
-	f := fixture(t, "configure_story")
-	for _, k := range []string{"priority", "x-fb-request-analytics-tags"} {
-		f.ReqHeaders[k] = fixture(t, "configure").ReqHeaders[k]
-	}
-	checkRequest(t, f, r.sent[1], "tap_models", "reshared_media_id")
+	checkRequest(t, configureStoryFixture(t), r.sent[1], "tap_models", "reshared_media_id")
 	got := r.sent[1].payload
 	if got["reshared_media_id"] != "4020371272796136701" || got["source_type"] != "4" {
 		t.Errorf("reshared_media_id = %v, source_type = %v", got["reshared_media_id"], got["source_type"])

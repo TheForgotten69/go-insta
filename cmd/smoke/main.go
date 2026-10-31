@@ -903,15 +903,12 @@ func linkedStory(ctx context.Context, insta *goinsta.Instagram, post *goinsta.It
 	if err != nil {
 		return "", err
 	}
-	linked := len(story.StoryFeedMedia) == 1
-	if linked {
+	linked := false
+	if len(story.StoryFeedMedia) == 1 {
 		m, _ := story.StoryFeedMedia[0].(map[string]any)
-		linked = m["media_id"] == fmt.Sprint(int64(post.Pk))
+		linked = m["media_id"] == post.Pk.String()
 	}
-	summary := fmt.Sprintf("%s, %d post stickers", story.ID, len(story.StoryFeedMedia))
-	if !linked {
-		err = errors.New("story does not link the post: " + summary)
-	}
+	summary, err := expect(linked, "%s, %d post stickers", story.ID, len(story.StoryFeedMedia))
 	return summary, errors.Join(err, story.Delete(ctx))
 }
 

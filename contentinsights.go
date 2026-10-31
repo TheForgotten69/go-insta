@@ -170,10 +170,7 @@ type storyViewersQuery struct {
 // StoryViewers pages through the accounts that viewed one of the account's own stories.
 func (item *Item) StoryViewers() *Pager[*User] {
 	var maxID string
-	owner := item.User.ID.String()
-	if _, id, ok := strings.Cut(item.ID, "_"); ok {
-		owner = id
-	}
+	owner := item.ownerID()
 	return newPager(func(ctx context.Context) ([]*User, string, error) {
 		var page struct {
 			Users     []*User         `json:"users"`

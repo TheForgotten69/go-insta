@@ -316,6 +316,17 @@ func (item *Item) pk() string {
 	return pk
 }
 
+// ownerID is the posting account's id, "" when unknown.
+func (item *Item) ownerID() string {
+	if _, id, ok := strings.Cut(item.ID, "_"); ok {
+		return id
+	}
+	if item.User.ID != 0 {
+		return item.User.ID.String()
+	}
+	return ""
+}
+
 func (item *Item) mediaTypeName() string {
 	switch item.MediaType {
 	case MediaVideo:
