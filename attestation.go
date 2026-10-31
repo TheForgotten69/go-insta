@@ -102,7 +102,7 @@ func signSHA256(k *ecdsa.PrivateKey, msg []byte) (string, error) {
 func (a *Attestation) ZCA(now time.Time) (string, error) {
 	timeStr := strconv.FormatInt(now.UnixMilli(), 10)
 	hsum := sha256.Sum256([]byte(timeStr))
-	dataToSign, err := json.Marshal(map[string]string{"time": timeStr, "hash": b64url(hsum[:])})
+	dataToSign, err := json.Marshal(zcaSignedData{Time: timeStr, Hash: b64url(hsum[:])})
 	if err != nil {
 		return "", err
 	}
@@ -110,25 +110,72 @@ func (a *Attestation) ZCA(now time.Time) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	doc := map[string]any{"android": map[string]any{
-		"aka": map[string]any{
-			"dataToSign":            string(dataToSign),
-			"signedData":            signed,
-			"keyHash":               a.keyHash,
-			"lastUploadedKeyTimeMs": a.lastUploadedKeyTimeMs,
+	raw, err := json.Marshal(zcaDoc{Android: zcaAndroid{
+		AKA: zcaAKA{
+			DataToSign:            string(dataToSign),
+			SignedData:            signed,
+			KeyHash:               a.keyHash,
+			LastUploadedKeyTimeMs: a.lastUploadedKeyTimeMs,
 		},
-		"gpia": map[string]any{"token": "", "errors": []string{"PLAY_INTEGRITY_DISABLED_BY_CONFIG"}},
-		"payload": map[string]any{"plugins": map[string]any{
-			"bat": map[string]any{"sta": a.BatteryState, "lvl": a.BatteryLevel},
-			"sct": map[string]any{},
-			"adb": map[string]any{"usb": -1, "adb": 1, "usb_adb": -1},
+		GPIA: zcaGPIA{Errors: []string{"PLAY_INTEGRITY_DISABLED_BY_CONFIG"}},
+		Payload: zcaPayload{Plugins: zcaPlugins{
+			Bat: zcaBattery{Sta: a.BatteryState, Lvl: a.BatteryLevel},
+			ADB: zcaADB{USB: -1, ADB: 1, USBADB: -1},
 		}},
-	}}
-	raw, err := json.Marshal(doc)
+	}})
 	if err != nil {
 		return "", err
 	}
 	return base64.StdEncoding.EncodeToString(raw), nil
+}
+
+// zcaSignedData is the aka.dataToSign document, keys in the app's order.
+type zcaSignedData struct {
+	Time string `json:"time"`
+	Hash string `json:"hash"`
+}
+
+type zcaDoc struct {
+	Android zcaAndroid `json:"android"`
+}
+
+type zcaAndroid struct {
+	AKA     zcaAKA     `json:"aka"`
+	GPIA    zcaGPIA    `json:"gpia"`
+	Payload zcaPayload `json:"payload"`
+}
+
+type zcaAKA struct {
+	DataToSign            string `json:"dataToSign"`
+	SignedData            string `json:"signedData"`
+	KeyHash               string `json:"keyHash"`
+	LastUploadedKeyTimeMs int64  `json:"lastUploadedKeyTimeMs"`
+}
+
+type zcaGPIA struct {
+	Token  string   `json:"token"`
+	Errors []string `json:"errors"`
+}
+
+type zcaPayload struct {
+	Plugins zcaPlugins `json:"plugins"`
+}
+
+type zcaPlugins struct {
+	Bat zcaBattery  `json:"bat"`
+	Sct emptyObject `json:"sct"`
+	ADB zcaADB      `json:"adb"`
+}
+
+type zcaBattery struct {
+	Sta string `json:"sta"`
+	Lvl int    `json:"lvl"`
+}
+
+type zcaADB struct {
+	USB    int `json:"usb"`
+	ADB    int `json:"adb"`
+	USBADB int `json:"usb_adb"`
 }
 
 // USDID builds the x-meta-usdid value "uuid.expiry.spki.sig", signed over the
