@@ -3,6 +3,7 @@
 package goinsta
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -25,12 +26,12 @@ func TestLiveCreatorInsights(t *testing.T) {
 	if fanClub == "" {
 		fanClub = "0"
 	}
-	show := func(name string, in *CreatorInsights, err error) {
+	show := func(name string, in json.RawMessage, err error) {
 		if err != nil {
 			t.Logf("%-28s err=%v", name, err)
 			return
 		}
-		t.Logf("%-28s %.1500s", name, in.Raw)
+		t.Logf("%-28s %.1500s", name, in)
 	}
 	in, err := insta.SeriesInsightsOverview(ctx, series, true)
 	show("SeriesInsightsOverview", in, err)
@@ -40,6 +41,4 @@ func TestLiveCreatorInsights(t *testing.T) {
 	show("SeriesInsightsAudience", in, err)
 	in, err = insta.Account.FanClubInsights(ctx, fanClub, time.Time{})
 	show("FanClubInsights", in, err)
-	sub, err := insta.Account.SubscriptionInsights(ctx)
-	t.Logf("%-28s err=%v %+v", "SubscriptionInsights", err, sub)
 }

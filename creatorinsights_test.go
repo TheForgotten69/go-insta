@@ -2,6 +2,7 @@ package goinsta
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -12,36 +13,35 @@ func TestCreatorInsightsRequests(t *testing.T) {
 		if s.req.URL.Path == "/api/v1/creators/user_pay/insights/" {
 			return 200, `{"status":"ok","total":3}`
 		}
-		return 200, `{"data":{"fetch__XIGLinkedMediaPlaylist":{"id":"1"},"node":{"id":"2"},` +
-			`"xfb_oxsights_event_insights_query_events_for_upsampling":[]},"extensions":{"is_final":true}}`
+		return 200, `{"data":{"fetch__XIGLinkedMediaPlaylist":{"id":"1"},"node":{"id":"2"}},"extensions":{"is_final":true}}`
 	})
 	ctx := t.Context()
 	day := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
 
 	for _, tc := range []struct {
 		name, doc string
-		call      func(context.Context) (*CreatorInsights, error)
+		call      func(context.Context) (json.RawMessage, error)
 		vars      map[string]any
 	}{
-		{"SeriesInsightsOverviewQuery", docSeriesInsightsOverview,
-			func(ctx context.Context) (*CreatorInsights, error) {
+		{friendlySeriesInsightsOverview, docSeriesInsightsOverview,
+			func(ctx context.Context) (json.RawMessage, error) {
 				return insta.SeriesInsightsOverview(ctx, "99", true)
 			},
 			map[string]any{"playlistId": "99", "includeViewsOverTime": true}},
-		{"SeriesInsightsEngagementQuery", docSeriesInsightsEngagement,
-			func(ctx context.Context) (*CreatorInsights, error) { return insta.SeriesInsightsEngagement(ctx, "99") },
+		{friendlySeriesInsightsEngagement, docSeriesInsightsEngagement,
+			func(ctx context.Context) (json.RawMessage, error) { return insta.SeriesInsightsEngagement(ctx, "99") },
 			map[string]any{"playlistId": "99"}},
-		{"SeriesInsightsAudienceQuery", docSeriesInsightsAudience,
-			func(ctx context.Context) (*CreatorInsights, error) { return insta.SeriesInsightsAudience(ctx, "99") },
+		{friendlySeriesInsightsAudience, docSeriesInsightsAudience,
+			func(ctx context.Context) (json.RawMessage, error) { return insta.SeriesInsightsAudience(ctx, "99") },
 			map[string]any{"playlistId": "99"}},
-		{"FanClubInsights", docFanClubInsights,
-			func(ctx context.Context) (*CreatorInsights, error) {
+		{friendlyFanClubInsights, docFanClubInsights,
+			func(ctx context.Context) (json.RawMessage, error) {
 				return insta.Account.FanClubInsights(ctx, "7", day)
 			},
 			map[string]any{"fan_club_id": "7", "date": "2026-10-31", "count": 50.0}},
 	} {
 		in, err := tc.call(ctx)
-		if err != nil || len(in.Raw) == 0 {
+		if err != nil || len(in) == 0 {
 			t.Errorf("%s: %v %v", tc.name, in, err)
 			continue
 		}

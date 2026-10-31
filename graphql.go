@@ -50,12 +50,16 @@ const (
 	rootSetCommentInsightsOptIn     = "xdt_update_comment_summary_opt_in_by_user_id"
 	friendlySetCommentInsightsOptIn = "IGCommentInsightsOptinStatusMutation"
 
-	docSeriesInsightsOverview   = "383515635314126103399555900562"
-	docSeriesInsightsEngagement = "281083989014079368110826164376"
-	docSeriesInsightsAudience   = "386340097017018189326628161392"
-	docFanClubInsights          = "147178694610827473488858200058"
-	rootLinkedMediaPlaylist     = "fetch__XIGLinkedMediaPlaylist"
-	rootFanClubInsights         = "node"
+	docSeriesInsightsOverview        = "383515635314126103399555900562"
+	docSeriesInsightsEngagement      = "281083989014079368110826164376"
+	docSeriesInsightsAudience        = "386340097017018189326628161392"
+	docFanClubInsights               = "147178694610827473488858200058"
+	friendlySeriesInsightsOverview   = "SeriesInsightsOverviewQuery"
+	friendlySeriesInsightsEngagement = "SeriesInsightsEngagementQuery"
+	friendlySeriesInsightsAudience   = "SeriesInsightsAudienceQuery"
+	friendlyFanClubInsights          = "FanClubInsights"
+	rootLinkedMediaPlaylist          = "fetch__XIGLinkedMediaPlaylist"
+	rootFanClubInsights              = "node"
 
 	rootAccountInsights                 = "ig_account_insights"
 	docAccountInsightsHome              = "38444011412098991622225483328"
@@ -141,18 +145,7 @@ func (insta *Instagram) graphQL(ctx context.Context, gq gqlQuery, vars any) ([]b
 	if err != nil {
 		return nil, err
 	}
-	merged, err := mergeIncremental(body)
-	if err != nil {
-		return nil, err
-	}
-	var top struct {
-		Data   json.RawMessage `json:"data"`
-		Errors []GraphQLError  `json:"errors"`
-	}
-	if json.Unmarshal(merged, &top) == nil && len(top.Errors) > 0 && (len(top.Data) == 0 || string(top.Data) == "null") {
-		return nil, &top.Errors[0]
-	}
-	return merged, nil
+	return mergeIncremental(body)
 }
 
 // mergeIncremental folds a @defer/@stream response (NDJSON: a skeleton, then
@@ -277,7 +270,7 @@ func isRootKey(key, name string) bool {
 }
 
 // graphQLData runs the query and returns its data fields and its root: gq.root,
-// or with none the single non-null field. A null or missing root is the
+// or with none the first non-null field. A null or missing root is the
 // response's first error, else ErrEmptyResponse.
 func (insta *Instagram) graphQLData(ctx context.Context, gq gqlQuery, vars any) (map[string]json.RawMessage, json.RawMessage, error) {
 	body, err := insta.graphQL(ctx, gq, vars)
@@ -310,6 +303,46 @@ func (insta *Instagram) graphQLRoot(ctx context.Context, gq gqlQuery, vars, out 
 		return err
 	}
 	return json.Unmarshal(root, out)
+}
+
+// graphQLInto runs the query and returns its root decoded as a T.
+func graphQLInto[T any](ctx context.Context, insta *Instagram, gq gqlQuery, vars any) (*T, error) {
+	var out T
+	if err := insta.graphQLRoot(ctx, gq, vars, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// connection is a GraphQL edges/node list.
+type connection[T any] struct {
+	Edges []struct {
+		Node T `json:"node"`
+	} `json:"edges"`
+	PageInfo graphQLPageInfo `json:"page_info"`
+}
+
+type graphQLPageInfo struct {
+	EndCursor   string `json:"end_cursor"`
+	HasNextPage bool   `json:"has_next_page"`
+}
+
+func (c connection[T]) nodes() []T {
+	out := make([]T, len(c.Edges))
+	for i, e := range c.Edges {
+		out[i] = e.Node
+	}
+	return out
+}
+
+func (c connection[T]) next() string { return c.PageInfo.cursor() }
+
+func (p graphQLPageInfo) cursor() string { return cursorIf(p.HasNextPage, p.EndCursor) }
+
+// graphQLAck runs a mutation whose root only acknowledges it.
+func (insta *Instagram) graphQLAck(ctx context.Context, gq gqlQuery, vars any) error {
+	_, _, err := insta.graphQLData(ctx, gq, vars)
+	return err
 }
 
 func (user *User) Posts() *Pager[*Item] {

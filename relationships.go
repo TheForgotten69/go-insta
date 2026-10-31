@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 )
 
 type blockRequest struct {
@@ -171,23 +172,14 @@ type pendingFollowsVars struct {
 // accept their follow request; first page only, as the app's request screen.
 func (account *Account) PendingFollowRequests(ctx context.Context) ([]*User, error) {
 	var pending struct {
-		Users struct {
-			Edges []struct {
-				Node *User `json:"node"`
-			} `json:"edges"`
-		} `json:"users"`
+		Users connection[*User] `json:"users"`
 	}
 	err := account.insta.graphQLRoot(ctx, gqlQuery{friendly: "PendingFollows", docID: docPendingFollows,
 		root: "xdt_friendships_pending_users"}, pendingFollowsVars{PageSize: 20, ExcludeSuggestedUsers: true}, &pending)
 	if err != nil {
 		return nil, err
 	}
-	users := make([]*User, 0, len(pending.Users.Edges))
-	for _, e := range pending.Users.Edges {
-		if e.Node != nil {
-			users = append(users, e.Node)
-		}
-	}
+	users := slices.DeleteFunc(pending.Users.nodes(), func(u *User) bool { return u == nil })
 	return account.insta.usersFrom(users, entryContext{}), nil
 }
 
@@ -198,16 +190,14 @@ type followRequestVars struct {
 
 // ApproveFollowRequest accepts the user's request to follow the account.
 func (user *User) ApproveFollowRequest(ctx context.Context) error {
-	_, err := user.insta.graphQL(ctx, gqlQuery{url: graphQLWWWURL, friendly: "ApproveFollowRequest",
+	return user.insta.graphQLAck(ctx, gqlQuery{url: graphQLWWWURL, friendly: "ApproveFollowRequest",
 		docID: docApproveFollowRequest, root: "xdt_friendships_approve_user"}, user.followRequestVars())
-	return err
 }
 
 // IgnoreFollowRequest declines the user's request to follow the account.
 func (user *User) IgnoreFollowRequest(ctx context.Context) error {
-	_, err := user.insta.graphQL(ctx, gqlQuery{friendly: "IgnoreFollowRequest",
+	return user.insta.graphQLAck(ctx, gqlQuery{friendly: "IgnoreFollowRequest",
 		docID: docIgnoreFollowRequest, root: "xdt_friendships_ignore_user_v2"}, user.followRequestVars())
-	return err
 }
 
 func (user *User) followRequestVars() followRequestVars {

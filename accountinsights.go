@@ -12,6 +12,8 @@ const (
 	metaOnePacingCreator = "IG_COMPETITIVE_INSIGHTS_CREATOR_DASH_PERMANENT_UPSELL"
 	metaOnePacingPro     = "IG_COMPETITIVE_INSIGHTS_PRO_DASH_PERMANENT_UPSELL"
 
+	periodCustom = "CUSTOM"
+
 	contentInsightsPageSize  = 24
 	previousBioLinksPageSize = 20
 )
@@ -40,7 +42,7 @@ var (
 
 // CustomPeriod is the date picker's range; Instagram takes it in whole seconds.
 func CustomPeriod(start, end time.Time) InsightsPeriod {
-	return InsightsPeriod{name: "CUSTOM", start: start.Unix(), end: end.Unix()}
+	return InsightsPeriod{name: periodCustom, start: start.Unix(), end: end.Unix()}
 }
 
 func (p InsightsPeriod) String() string {
@@ -60,11 +62,13 @@ type insightsRangeVars struct {
 
 func (p InsightsPeriod) vars() insightsRangeVars {
 	v := insightsRangeVars{Period: p.String()}
-	if p.name == "CUSTOM" {
+	if p.custom() {
 		v.StartDate, v.EndDate = &p.start, &p.end
 	}
 	return v
 }
+
+func (p InsightsPeriod) custom() bool { return p.name == periodCustom }
 
 // InsightsMetric ranks the content tab. The empty value sends "views", as the app
 // does for its "latest" sort.
@@ -336,8 +340,8 @@ type AudienceShare struct {
 // ContentInsightsOptions are the content tab's filters.
 type ContentInsightsOptions struct {
 	Period             InsightsPeriod
-	Metric             InsightsMetric      // "" = MetricViews
-	Type               InsightsContentType // "" = all
+	Metric             InsightsMetric
+	Type               InsightsContentType
 	SortByCreationTime bool
 	Ascending          bool
 }
@@ -388,29 +392,9 @@ type AccountInsightsViewerState struct {
 	PremiumInsights   json.RawMessage `json:"premium_insights"` // null without Meta Verified
 }
 
-type graphQLPageInfo struct {
-	EndCursor   string `json:"end_cursor"`
-	HasNextPage bool   `json:"has_next_page"`
-}
-
-type bioLinkConnection struct {
-	Edges []struct {
-		Node BioLinkInsights `json:"node"`
-	} `json:"edges"`
-	PageInfo graphQLPageInfo `json:"page_info"`
-}
-
-func (c bioLinkConnection) links() []BioLinkInsights {
-	out := make([]BioLinkInsights, len(c.Edges))
-	for i, e := range c.Edges {
-		out[i] = e.Node
-	}
-	return out
-}
-
 type bioLinksList struct {
-	Links    bioLinkConnection `json:"links"`
-	HasLinks bool              `json:"has_links"`
+	Links    connection[BioLinkInsights] `json:"links"`
+	HasLinks bool                        `json:"has_links"`
 }
 
 type bloksHolder struct {
@@ -423,11 +407,14 @@ type bloksHolder struct {
 
 func (account *Account) bloksID() string { return account.insta.sess.BloksVersionID }
 
-// insights runs an account insights query and decodes its ig_account_insights
-// object. Insights need a professional account; a personal one gets the
-// server's *GraphQLError.
+// accountInsightsQuery reads the ig_account_insights object. Insights need a
+// professional account; a personal one gets the server's *GraphQLError.
+func accountInsightsQuery(docID, friendly string) gqlQuery {
+	return gqlQuery{url: graphQLWWWURL, friendly: friendly, docID: docID, root: rootAccountInsights}
+}
+
 func (account *Account) insights(ctx context.Context, docID, friendly string, vars, out any) error {
-	return account.insta.graphQLRoot(ctx, gqlQuery{url: graphQLWWWURL, friendly: friendly, docID: docID, root: rootAccountInsights}, vars, out)
+	return account.insta.graphQLRoot(ctx, accountInsightsQuery(docID, friendly), vars, out)
 }
 
 // InsightsHome loads the dashboard's home tab.
@@ -436,9 +423,7 @@ func (account *Account) InsightsHome(ctx context.Context, opts InsightsHomeOptio
 	if opts.Creator {
 		key = metaOnePacingCreator
 	}
-	data, root, err := account.insta.graphQLData(ctx, gqlQuery{
-		url: graphQLWWWURL, friendly: friendlyAccountInsightsHome, docID: docAccountInsightsHome, root: rootAccountInsights,
-	}, insightsHomeVars{
+	data, root, err := account.insta.graphQLData(ctx, accountInsightsQuery(docAccountInsightsHome, friendlyAccountInsightsHome), insightsHomeVars{
 		insightsRangeVars:      opts.Period.vars(),
 		IncludeTools:           true,
 		IncludeMetaOneSubtitle: true,
@@ -482,34 +467,23 @@ func (account *Account) InsightsHome(ctx context.Context, opts InsightsHomeOptio
 
 // InsightsOverview loads the overview tab.
 func (account *Account) InsightsOverview(ctx context.Context, period InsightsPeriod) (*AccountInsightsOverview, error) {
-	var in AccountInsightsOverview
-	err := account.insights(ctx, docAccountInsightsOverview, friendlyAccountInsightsOverview,
-		insightsOverviewVars{insightsRangeVars: period.vars(), RedesignEnabled: true, BloksVersioningID: account.bloksID()}, &in)
-	if err != nil {
-		return nil, err
-	}
-	return &in, nil
+	return graphQLInto[AccountInsightsOverview](ctx, account.insta, accountInsightsQuery(docAccountInsightsOverview, friendlyAccountInsightsOverview),
+		insightsOverviewVars{insightsRangeVars: period.vars(), RedesignEnabled: true, BloksVersioningID: account.bloksID()})
 }
 
 // InsightsAudience loads the audience (followers) tab. A custom period reads the
 // follower snapshot, as the redesigned app does.
 func (account *Account) InsightsAudience(ctx context.Context, period InsightsPeriod) (*AccountInsightsAudience, error) {
-	vars := period.vars()
-	var in AccountInsightsAudience
-	err := account.insights(ctx, docAccountInsightsAudience, friendlyAccountInsightsAudience, insightsAudienceVars{
-		insightsRangeVars:   vars,
+	return graphQLInto[AccountInsightsAudience](ctx, account.insta, accountInsightsQuery(docAccountInsightsAudience, friendlyAccountInsightsAudience), insightsAudienceVars{
+		insightsRangeVars:   period.vars(),
 		RedesignEnabled:     true,
-		UseFollowerSnapshot: vars.StartDate != nil,
+		UseFollowerSnapshot: period.custom(),
 		TopLanguagesEnabled: true,
 		BloksVersioningID:   account.bloksID(),
-	}, &in)
-	if err != nil {
-		return nil, err
-	}
-	return &in, nil
+	})
 }
 
-// InsightsContent pages through the content tab, 24 items a page, best first.
+// InsightsContent pages through the content tab.
 func (account *Account) InsightsContent(opts ContentInsightsOptions) *Pager[ContentInsightsItem] {
 	metric := string(cmp.Or(opts.Metric, MetricViews))
 	var contentType *string
@@ -538,8 +512,7 @@ func (account *Account) InsightsContent(opts ContentInsightsOptions) *Pager[Cont
 		if err != nil {
 			return nil, "", err
 		}
-		pi := page.YourContent.PageInfo
-		next := cursorIf(pi.HasNextPage, pi.EndCursor)
+		next := page.YourContent.PageInfo.cursor()
 		after = &next
 		return page.YourContent.Items, next, nil
 	})
@@ -580,12 +553,12 @@ func (account *Account) InsightsBioLinks(ctx context.Context, period InsightsPer
 	return &AccountInsightsBioLinks{
 		Taps:             b.Taps,
 		PageViews:        b.PageViews,
-		Links:            b.Links.Links.links(),
+		Links:            b.Links.Links.nodes(),
 		HasPreviousLinks: b.PreviousLinks.HasLinks,
 	}, nil
 }
 
-// InsightsPreviousBioLinks pages through the links removed from the bio, 20 a page.
+// InsightsPreviousBioLinks pages through the links removed from the bio.
 func (account *Account) InsightsPreviousBioLinks(period InsightsPeriod) *Pager[BioLinkInsights] {
 	var after *string
 	return newPager(func(ctx context.Context) ([]BioLinkInsights, string, error) {
@@ -600,22 +573,17 @@ func (account *Account) InsightsPreviousBioLinks(period InsightsPeriod) *Pager[B
 			return nil, "", err
 		}
 		conn := in.BioLinks.PreviousLinks.Links
-		next := cursorIf(conn.PageInfo.HasNextPage, conn.PageInfo.EndCursor)
+		next := conn.next()
 		after = &next
-		return conn.links(), next, nil
+		return conn.nodes(), next, nil
 	})
 }
 
 // InsightsViewerState loads the dashboard's eligibility state, with the premium
 // (Meta Verified) insights when includePremium is set.
 func (account *Account) InsightsViewerState(ctx context.Context, period InsightsPeriod, includePremium bool) (*AccountInsightsViewerState, error) {
-	var in AccountInsightsViewerState
-	err := account.insights(ctx, docAccountInsightsViewerState, friendlyAccountInsightsViewerState,
-		insightsViewerStateVars{Period: period.String(), IncludePremiumInsights: includePremium}, &in)
-	if err != nil {
-		return nil, err
-	}
-	return &in, nil
+	return graphQLInto[AccountInsightsViewerState](ctx, account.insta, accountInsightsQuery(docAccountInsightsViewerState, friendlyAccountInsightsViewerState),
+		insightsViewerStateVars{Period: period.String(), IncludePremiumInsights: includePremium})
 }
 
 // AcceptInsightsTerms accepts the insights terms (Account.ShowInsightsTerms).

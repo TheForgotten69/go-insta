@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 )
 
@@ -50,16 +49,11 @@ type mediaIGIDVars struct {
 // which serves Reels; its ReelInsightsQuery needs variables the decompiled app
 // does not name.
 func (item *Item) ReelInsights(ctx context.Context) (*ReelInsights, error) {
-	var in ReelInsights
-	err := item.insta.graphQLRoot(ctx, gqlQuery{
+	return graphQLInto[ReelInsights](ctx, item.insta, gqlQuery{
 		url:      graphQLWWWURL,
 		friendly: friendlyLongformInsights,
 		docID:    docLongformInsights,
-	}, mediaIGIDVars{MediaIGID: item.pk()}, &in)
-	if err != nil {
-		return nil, err
-	}
-	return &in, nil
+	}, mediaIGIDVars{MediaIGID: item.pk()})
 }
 
 // MediaProduct selects the kind of media in MediaInsightsGrid.
@@ -89,7 +83,7 @@ type mediaGridVars struct {
 }
 
 // MediaInsightsGrid pages through the account's media of one kind with their
-// reach (15 per page); each item is the raw media node. Stories cover the last
+// reach; each item is the raw media node. Stories cover the last
 // day, other kinds their lifetime.
 func (account *Account) MediaInsightsGrid(product MediaProduct) *Pager[json.RawMessage] {
 	timeframe := "LIFETIME"
@@ -100,12 +94,7 @@ func (account *Account) MediaInsightsGrid(product MediaProduct) *Pager[json.RawM
 	return newPager(func(ctx context.Context) ([]json.RawMessage, string, error) {
 		var page struct {
 			BusinessManager struct {
-				Medias struct {
-					Edges []struct {
-						Node json.RawMessage `json:"node"`
-					} `json:"edges"`
-					PageInfo graphQLPageInfo `json:"page_info"`
-				} `json:"medias"`
+				Medias connection[json.RawMessage] `json:"medias"`
 			} `json:"business_manager"`
 		}
 		err := account.insta.graphQLRoot(ctx, gqlQuery{
@@ -113,7 +102,7 @@ func (account *Account) MediaInsightsGrid(product MediaProduct) *Pager[json.RawM
 			friendly: friendlyMediaInsightsGrid,
 			docID:    docMediaInsightsGrid,
 		}, mediaGridVars{
-			QueryParams:                  mediaGridQueryParams{ID: strconv.FormatInt(account.insta.userID(), 10)},
+			QueryParams:                  mediaGridQueryParams{ID: account.ID.String()},
 			Count:                        15,
 			Timeframe:                    timeframe,
 			Metric:                       "MEDIA_ORGANIC_ACCOUNT_REACH_OR_PROMOTED_PEOPLE_BASED_REACH",
@@ -127,12 +116,8 @@ func (account *Account) MediaInsightsGrid(product MediaProduct) *Pager[json.RawM
 			return nil, "", err
 		}
 		m := page.BusinessManager.Medias
-		items := make([]json.RawMessage, len(m.Edges))
-		for i, e := range m.Edges {
-			items[i] = e.Node
-		}
-		cursor = m.PageInfo.EndCursor
-		return items, cursorIf(m.PageInfo.HasNextPage, cursor), nil
+		cursor = m.next()
+		return m.nodes(), cursor, nil
 	})
 }
 
@@ -163,22 +148,21 @@ func (account *Account) CommentInsightsOptIn(ctx context.Context) (bool, error) 
 		friendly: friendlyCommentInsightsOptIn,
 		docID:    docCommentInsightsOptIn,
 		root:     rootCommentInsightsOptIn,
-	}, commentInsightsOptInVars{RequestData: userIDRequestData{UserID: strconv.FormatInt(account.insta.userID(), 10)}}, &resp)
+	}, commentInsightsOptInVars{RequestData: userIDRequestData{UserID: account.ID.String()}}, &resp)
 	return resp.User.OptedIn, err
 }
 
 func (account *Account) SetCommentInsightsOptIn(ctx context.Context, optedIn bool) error {
-	_, err := account.insta.graphQL(ctx, gqlQuery{
+	return account.insta.graphQLAck(ctx, gqlQuery{
 		friendly: friendlySetCommentInsightsOptIn,
 		docID:    docSetCommentInsightsOptIn,
 		root:     rootSetCommentInsightsOptIn,
 	}, setCommentInsightsOptInVars{RequestData: optedInRequestData{OptedIn: optedIn}})
-	return err
 }
 
 type storyViewersQuery struct {
+	maxIDQuery
 	StoryHasInteractiveStickers string `json:"story_has_interactive_stickers"`
-	MaxID                       string `json:"max_id,omitempty"`
 	ReelViewerSource            string `json:"reel_viewer_source"`
 	ReelID                      string `json:"reel_id"`
 }
@@ -198,8 +182,8 @@ func (item *Item) StoryViewers() *Pager[*User] {
 		err := item.insta.callJSON(ctx, &reqOptions{
 			Endpoint: fmt.Sprintf(urlStoryViewers, item.pk()),
 			Form: storyViewersQuery{
+				maxIDQuery:                  maxIDQuery{MaxID: maxID},
 				StoryHasInteractiveStickers: "false",
-				MaxID:                       maxID,
 				ReelViewerSource:            "unknown",
 				ReelID:                      owner,
 			},

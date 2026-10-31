@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The project uses
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-31
+
 ### Features
 
 - Post management, from the app's request builders and verified live:
@@ -54,7 +56,9 @@ All notable changes to this project are documented here. The project uses
 
 - `Item.Insights` reads the live (non-aliased) root key.
 - `User.Info` and the account decode on professional accounts, which send a bool
-  where personal accounts send an object.
+  where personal accounts send an object. The empty fields that broke
+  (`User.LinkedFbInfo`, `User.HasEligibleWhatsappLinkingCategory`, the activity
+  `Counts`) are removed.
 - `ReelOptions.Trial` is documented to fail with HTTP 500 on personal accounts, where
   the Reel can still be published as a normal Reel.
 
@@ -206,6 +210,7 @@ First release: an Instagram for Android 453 private API client.
 - Stories, highlights, likes, comments, saves, follows, photo, album and story uploads.
 - `cmd/httplog` for device captures and `cmd/smoke` for live checks.
 
+[0.7.0]: https://github.com/TheForgotten69/go-insta/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/TheForgotten69/go-insta/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/TheForgotten69/go-insta/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/TheForgotten69/go-insta/compare/v0.3.4...v0.4.0

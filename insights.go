@@ -37,15 +37,10 @@ type postInsightsVars struct {
 
 // Insights loads the post's metrics.
 func (item *Item) Insights(ctx context.Context) (*Insights, error) {
-	var in Insights
-	err := item.insta.graphQLRoot(ctx, gqlQuery{
+	return graphQLInto[Insights](ctx, item.insta, gqlQuery{
 		url:      graphQLWWWURL,
 		friendly: friendlyPostInsights,
 		docID:    docPostInsights,
 		root:     rootPostInsights,
-	}, postInsightsVars{MediaIGID: item.pk(), BloksVersioningID: item.insta.sess.BloksVersionID}, &in)
-	if err != nil {
-		return nil, err
-	}
-	return &in, nil
+	}, postInsightsVars{MediaIGID: item.pk(), BloksVersioningID: item.insta.sess.BloksVersionID})
 }

@@ -165,9 +165,12 @@ func readAccountExtras(r *runner, insta *goinsta.Instagram) {
 	})
 }
 
-// readAnalytics needs a professional account; a personal one fails these steps.
 func readAnalytics(r *runner, insta *goinsta.Instagram) {
 	ctx, acc := r.ctx, insta.Account
+	if !acc.CanSeeOrganicInsights {
+		fmt.Println("skip  analytics: not a professional account")
+		return
+	}
 	r.step("account.InsightsHome", func() (string, error) {
 		h, err := acc.InsightsHome(ctx, goinsta.InsightsHomeOptions{})
 		if err != nil {
@@ -224,10 +227,16 @@ func readAnalytics(r *runner, insta *goinsta.Instagram) {
 		_, err := acc.InsightsViewerState(ctx, goinsta.PeriodThisMonth, true)
 		return "", err
 	})
-	r.step("account.MediaInsightsGrid (Reels)", func() (string, error) {
-		g := acc.MediaInsightsGrid(goinsta.MediaProductReels)
-		err := g.Next(ctx)
-		return fmt.Sprintf("%d Reels", len(g.Items)), err
+	r.step("account.MediaInsightsGrid (feed, story, Reels)", func() (string, error) {
+		var counts []int
+		for _, p := range []goinsta.MediaProduct{goinsta.MediaProductFeed, goinsta.MediaProductStory, goinsta.MediaProductReels} {
+			g := acc.MediaInsightsGrid(p)
+			if err := page(ctx, g.Next); err != nil {
+				return string(p), err
+			}
+			counts = append(counts, len(g.Items))
+		}
+		return fmt.Sprint(counts), nil
 	})
 	r.step("account.CommentInsightsOptIn", func() (string, error) {
 		on, err := acc.CommentInsightsOptIn(ctx)
@@ -543,6 +552,29 @@ func writeAccount(r *runner, insta *goinsta.Instagram) {
 		}
 		return fmt.Sprintf("toggled from %v and back", on), acc.SetStoryAutoArchive(ctx, on)
 	})
+	if !acc.CanSeeOrganicInsights {
+		return
+	}
+	r.step("SetCommentInsightsOptIn x2", func() (string, error) {
+		on, err := acc.CommentInsightsOptIn(ctx)
+		if err != nil {
+			return "", err
+		}
+		if err := acc.SetCommentInsightsOptIn(ctx, !on); err != nil {
+			return "", err
+		}
+		flipped, err := acc.CommentInsightsOptIn(ctx)
+		if err != nil {
+			return "", err
+		}
+		if err := acc.SetCommentInsightsOptIn(ctx, on); err != nil {
+			return "", err
+		}
+		if flipped == on {
+			return "", fmt.Errorf("opt-in still %v after setting %v", flipped, !on)
+		}
+		return fmt.Sprintf("toggled from %v and back", on), nil
+	})
 }
 
 func writePost(r *runner, insta *goinsta.Instagram) {
@@ -690,6 +722,11 @@ func writeStory(r *runner, insta *goinsta.Instagram) {
 			return "", errors.New("uploaded story not in own reel")
 		}
 		return fmt.Sprintf("%d items", len(reel.Items)), reel.MarkSeen(ctx, reel.Items...)
+	})
+	r.step("item.StoryViewers", func() (string, error) {
+		v := story.StoryViewers()
+		err := page(ctx, v.Next)
+		return fmt.Sprintf("%d viewers", len(v.Items)), err
 	})
 	r.step("item.LikeStory (own)", func() (string, error) { return "", story.LikeStory(ctx) })
 	r.step("item.Delete (story)", func() (string, error) { return story.ID, story.Delete(ctx) })

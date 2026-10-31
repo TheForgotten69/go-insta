@@ -2,6 +2,7 @@ package goinsta
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -94,7 +95,15 @@ func TestBlockedUsersPages(t *testing.T) {
 
 func TestFollowRequestGraphQL(t *testing.T) {
 	insta, _ := newReplay(t)
-	calls := capture(t, insta, answer(`{"data":{"xdt_friendships_pending_users":{"users":{"edges":[{"node":{"pk":"5","username":"x"}}]}}}}`))
+	calls := capture(t, insta, func(s sent) (int, string) {
+		switch s.payload["fb_api_req_friendly_name"] {
+		case "ApproveFollowRequest":
+			return 200, `{"data":{"xdt_friendships_approve_user":{"friendship_status":{"followed_by":true}}}}`
+		case "IgnoreFollowRequest":
+			return 200, `{"data":{"xdt_friendships_ignore_user_v2":{"friendship_status":{"incoming_request":false}}}}`
+		}
+		return 200, `{"data":{"xdt_friendships_pending_users":{"users":{"edges":[{"node":{"pk":"5","username":"x"}},{"node":null}]}}}}`
+	})
 	last := func() sent { return (*calls)[len(*calls)-1] }
 	ctx := t.Context()
 
@@ -127,5 +136,12 @@ func TestFollowRequestGraphQL(t *testing.T) {
 	got = last()
 	if v := got.vars(); got.req.URL.Path != "/graphql/query" || got.payload["client_doc_id"] != docIgnoreFollowRequest || v["user_id"] != "5" {
 		t.Errorf("ignore: %s %v", got.req.URL.Path, got.payload)
+	}
+
+	insta2, _ := newReplay(t)
+	capture(t, insta2, answer(`{"data":{"xdt_friendships_approve_user":null},"errors":[{"code":1,"summary":"S","message":"M"}]}`))
+	var ge *GraphQLError
+	if err := insta2.NewUser(5).ApproveFollowRequest(ctx); !errors.As(err, &ge) {
+		t.Errorf("approve with errors = %v, want *GraphQLError", err)
 	}
 }
