@@ -189,6 +189,14 @@ func readAnalytics(r *runner, insta *goinsta.Instagram) {
 		}
 		return fmt.Sprintf("followers=%s, %d age ranges", a.Followers.FormattedValue, len(a.Age.Entries)), nil
 	})
+	r.step("account.InsightsAudience (custom 7 days)", func() (string, error) {
+		now := time.Now()
+		a, err := acc.InsightsAudience(ctx, goinsta.CustomPeriod(now.AddDate(0, 0, -7), now))
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d active-follower points", len(a.ActiveFollowersOverTime.DataPoints)), nil
+	})
 	var newest string
 	r.step("account.InsightsContent", func() (string, error) {
 		c := acc.InsightsContent(goinsta.ContentInsightsOptions{})
@@ -220,22 +228,6 @@ func readAnalytics(r *runner, insta *goinsta.Instagram) {
 		g := acc.MediaInsightsGrid(goinsta.MediaProductReels)
 		err := g.Next(ctx)
 		return fmt.Sprintf("%d Reels", len(g.Items)), err
-	})
-	r.step("item.ReelInsights (newest own Reel)", func() (string, error) {
-		posts := acc.User().Posts()
-		if err := posts.Next(ctx); err != nil {
-			return "", err
-		}
-		for _, it := range posts.Items {
-			if it.ProductType == "clips" {
-				in, err := it.ReelInsights(ctx)
-				if err != nil {
-					return "", err
-				}
-				return "views=" + in.Views.FormattedValue, nil
-			}
-		}
-		return "no own Reel", nil
 	})
 	r.step("account.CommentInsightsOptIn", func() (string, error) {
 		on, err := acc.CommentInsightsOptIn(ctx)
@@ -785,6 +777,13 @@ func writeReel(r *runner, insta *goinsta.Instagram, file string, keep bool) {
 			return "", err
 		}
 		return "", it.SetDownloads(ctx, true)
+	})
+	r.step("item.ReelInsights", func() (string, error) {
+		in, err := it.ReelInsights(ctx)
+		if err != nil {
+			return "", err
+		}
+		return "views=" + in.Views.FormattedValue, nil
 	})
 	if !keep {
 		r.step("item.Delete (reel)", func() (string, error) { return it.ID, it.Delete(ctx) })
