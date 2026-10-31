@@ -116,7 +116,6 @@ var (
 
 	ErrInvalidImage       = errors.New("invalid file type, please use a jpeg or webp image")
 	ErrInvalidVideo       = errors.New("invalid video, please use an mp4 with a video track")
-	ErrReelStoryShare     = errors.New("ShareToStory is not supported for Reels")
 	ErrNoHighlightItems   = errors.New("a highlight needs at least one story item")
 	ErrNotHighlight       = errors.New("reel is not a highlight")
 	ErrCarouselMediaLimit = errors.New("an album takes 2 to 20 photos")

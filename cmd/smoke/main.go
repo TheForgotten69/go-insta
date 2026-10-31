@@ -544,7 +544,7 @@ func writeReel(r *runner, insta *goinsta.Instagram, file string, keep bool) {
 			return "", err
 		}
 		defer f.Close()
-		it, err = insta.UploadReel(ctx, f, goinsta.PostOptions{Caption: "go-insta reel smoke"})
+		it, err = insta.UploadReel(ctx, f, goinsta.ReelOptions{PostOptions: goinsta.PostOptions{Caption: "go-insta reel smoke"}})
 		if err != nil {
 			return "", err
 		}

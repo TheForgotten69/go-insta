@@ -81,7 +81,7 @@ func TestUploadReel(t *testing.T) {
 	transcodeWait = time.Millisecond
 
 	mp4 := testMP4(1080, 1920, 6013, false)
-	it, err := insta.UploadReel(t.Context(), bytes.NewReader(mp4), PostOptions{Caption: "hi"})
+	it, err := insta.UploadReel(t.Context(), bytes.NewReader(mp4), ReelOptions{PostOptions: PostOptions{Caption: "hi"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,8 +134,51 @@ func TestUploadReel(t *testing.T) {
 	if it.Code != "DfIyrN2N2bz" || it.MediaType != 2 {
 		t.Errorf("reel = %s type %d", it.Code, it.MediaType)
 	}
+}
 
-	if _, err := insta.UploadReel(t.Context(), bytes.NewReader(mp4), PostOptions{ShareToStory: true}); !errors.Is(err, ErrReelStoryShare) {
-		t.Errorf("ShareToStory err = %v", err)
+func TestReelOptions(t *testing.T) {
+	at := time.Date(2026, 11, 2, 18, 0, 0, 0, time.UTC)
+	o := ReelOptions{
+		PostOptions:     PostOptions{ShareToStory: true},
+		HideFromFeed:    true,
+		DisableComments: true, AllowDownloads: true, DisableTemplate: true,
+		Captions: true, TranslateCaption: true, Gifting: true,
+		Audience: AudienceCloseFriends, CoverFrameMs: 1500, Trial: TrialPerformance,
+		VoiceTranslation: &VoiceTranslation{InputLanguage: "fra", Languages: []string{"eng", "spa"}, LipSync: true},
+		ScheduledAt:      at,
+		Extra:            map[string]any{"disable_comments": "0", "music_start_time_ms": "0"},
+	}
+	p := map[string]any{"audience": "default"}
+	if err := o.apply(p); err != nil {
+		t.Fatal(err)
+	}
+	for k, want := range map[string]any{
+		"is_auto_resharing_to_story": "1", "disable_comments": "0", "third_party_downloads_enabled": "1",
+		"is_template_disabled": "1", "video_subtitles_enabled": "1", "video_subtitles_translations_enabled": "1",
+		"is_gifting_enabled": "1", "audience": "besties", "cover_frame_time_ms": "1500",
+		"publish_mode": "scheduled", "music_start_time_ms": "0",
+		"content_scheduling_metadata": `{"scheduled_publish_time":1793642400}`,
+		"clips_voice_translation_metadata": `{"translation_input_language":"fra","translation_lipsync_enabled":"1",` +
+			`"translation_approval_flow_enabled":"0","translation_languages":["eng","spa"]}`,
+	} {
+		if p[k] != want {
+			t.Errorf("%s = %v, want %v", k, p[k], want)
+		}
+	}
+	if _, shared := p["clips_share_preview_to_feed"]; shared {
+		t.Error("HideFromFeed still sent clips_share_preview_to_feed")
+	}
+	if tp, _ := p["trial_params"].(trialParams); tp.GraduationStrategy != TrialPerformance {
+		t.Errorf("trial_params = %v", p["trial_params"])
+	}
+
+	zero := map[string]any{}
+	if err := (&ReelOptions{}).apply(zero); err != nil || len(zero) != 1 || zero["clips_share_preview_to_feed"] != "1" {
+		t.Errorf("zero options sent %v (%v), want only clips_share_preview_to_feed", zero, err)
+	}
+	insta, _ := newReplay(t)
+	if _, err := insta.UploadReel(t.Context(), bytes.NewReader(testMP4(1080, 1920, 6000, false)),
+		ReelOptions{VoiceTranslation: &VoiceTranslation{Languages: []string{"eng"}}}); err == nil {
+		t.Error("voice translation without InputLanguage accepted")
 	}
 }
