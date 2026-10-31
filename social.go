@@ -2,8 +2,6 @@ package goinsta
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"strings"
 )
 
@@ -51,7 +49,12 @@ func (insta *Instagram) SearchUsers(query string) *Pager[*User] {
 	searchSession := generateUUID()
 	var pageToken string
 	return newPager(func(ctx context.Context) ([]*User, string, error) {
-		q, err := formOf(searchUsersQuery{
+		var resp struct {
+			Users     []*User `json:"users"`
+			HasMore   bool    `json:"has_more"`
+			PageToken string  `json:"page_token"`
+		}
+		if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlAccountSerp, Form: searchUsersQuery{
 			SearchSurface:     "user_serp",
 			SerpSessionID:     serpSession,
 			QplJoinID:         serpSession,
@@ -66,16 +69,7 @@ func (insta *Instagram) SearchUsers(query string) *Pager[*User] {
 			Count:             "30",
 			Query:             query,
 			PageToken:         pageToken,
-		})
-		if err != nil {
-			return nil, "", err
-		}
-		var resp struct {
-			Users     []*User `json:"users"`
-			HasMore   bool    `json:"has_more"`
-			PageToken string  `json:"page_token"`
-		}
-		if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlAccountSerp, Query: q}, &resp); err != nil {
+		}}, &resp); err != nil {
 			return nil, "", err
 		}
 		pageToken = resp.PageToken
@@ -210,26 +204,13 @@ func (user *User) followList(friendly, doc, root string, entry entryContext, var
 	insta := user.insta
 	var maxID string
 	return newPager(func(ctx context.Context) ([]*User, string, error) {
-		body, err := insta.graphQL(ctx, gqlQuery{friendly: friendly, docID: doc, root: root, gzip: true}, varsFor(user.ID, maxID))
-		if err != nil {
-			return nil, "", err
-		}
-		var resp struct {
-			Data map[string]json.RawMessage `json:"data"`
-		}
-		if err := json.Unmarshal(body, &resp); err != nil {
-			return nil, "", err
-		}
-		raw, ok := rootField(resp.Data, root)
-		if !ok || string(raw) == "null" {
-			return nil, "", fmt.Errorf("%s: %w", friendly, ErrEmptyResponse)
-		}
 		var list struct {
 			Users     []gqlUser `json:"users"`
 			HasMore   bool      `json:"has_more"`
 			NextMaxID *string   `json:"next_max_id"`
 		}
-		if err := json.Unmarshal(raw, &list); err != nil {
+		err := insta.graphQLRoot(ctx, gqlQuery{friendly: friendly, docID: doc, root: root, gzip: true}, varsFor(user.ID, maxID), &list)
+		if err != nil {
 			return nil, "", err
 		}
 		maxID = ""
@@ -263,11 +244,7 @@ func (insta *Instagram) Friendships(ctx context.Context, ids ...int64) (map[stri
 	var resp struct {
 		Statuses map[string]Friendship `json:"friendship_statuses"`
 	}
-	q, err := formOf(showManyRequest{UUID: insta.uuid, IncludeFollowedBy: "true", UserIDs: strings.Join(s, ", ")})
-	if err != nil {
-		return nil, err
-	}
-	err = insta.callJSON(ctx, &reqOptions{Endpoint: urlFriendshipShowMany, IsPost: true, Query: q}, &resp)
+	err := insta.callJSON(ctx, &reqOptions{Endpoint: urlFriendshipShowMany, IsPost: true, Form: showManyRequest{UUID: insta.uuid, IncludeFollowedBy: "true", UserIDs: strings.Join(s, ", ")}}, &resp)
 	if err != nil {
 		return nil, err
 	}

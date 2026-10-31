@@ -10,14 +10,6 @@ import (
 	"time"
 )
 
-const (
-	urlDirectInbox        = "direct_v2/inbox/"
-	urlDirectPendingInbox = "direct_v2/pending_inbox/"
-	urlDirectThread       = "direct_v2/threads/%s/"
-	urlDirectSendText     = "direct_v2/threads/broadcast/text/"
-	urlDirectItemSeen     = "direct_v2/threads/%s/items/%s/seen/"
-)
-
 // Thread is a direct-message conversation.
 type Thread struct {
 	insta *Instagram
@@ -150,10 +142,6 @@ func (insta *Instagram) inbox(endpoint string) *Inbox {
 			query.CursorTimestampMs = next.TimestampMs.String()
 			query.CursorRelevancyScore = next.RelevancyScore.String()
 		}
-		q, err := formOf(query)
-		if err != nil {
-			return nil, "", err
-		}
 		var resp struct {
 			Inbox struct {
 				Threads      []*Thread   `json:"threads"`
@@ -163,7 +151,7 @@ func (insta *Instagram) inbox(endpoint string) *Inbox {
 			} `json:"inbox"`
 			PendingRequestsTotal int `json:"pending_requests_total"`
 		}
-		if err := insta.callJSON(ctx, &reqOptions{Endpoint: endpoint, Query: q}, &resp); err != nil {
+		if err := insta.callJSON(ctx, &reqOptions{Endpoint: endpoint, Form: query}, &resp); err != nil {
 			return nil, "", err
 		}
 		for _, t := range resp.Inbox.Threads {
@@ -197,18 +185,14 @@ func (insta *Instagram) fetchThread(ctx context.Context, threadID, cursor string
 	if cursor != "" {
 		query.Cursor, query.Direction = cursor, "older"
 	}
-	q, err := formOf(query)
-	if err != nil {
-		return nil, err
-	}
 	var resp struct {
 		Thread *Thread `json:"thread"`
 	}
-	if err := insta.callJSON(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlDirectThread, threadID), Query: q}, &resp); err != nil {
+	if err := insta.callJSON(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlDirectThread, threadID), Form: query}, &resp); err != nil {
 		return nil, err
 	}
 	if resp.Thread == nil {
-		return nil, fmt.Errorf("thread %s: no thread in response", threadID)
+		return nil, fmt.Errorf("thread %s: %w", threadID, ErrEmptyResponse)
 	}
 	resp.Thread.setValues(insta)
 	return resp.Thread, nil
@@ -267,7 +251,10 @@ func (insta *Instagram) SendDirectText(ctx context.Context, text string, userIDs
 
 func (insta *Instagram) sendText(ctx context.Context, text, threadIDs, recipients string) (*DirectSent, error) {
 	otid := offlineThreadingID()
-	q, err := formOf(sendTextForm{
+	var resp struct {
+		Payload DirectSent `json:"payload"`
+	}
+	if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlDirectSendText, IsPost: true, Form: sendTextForm{
 		UUID:               insta.uuid,
 		Action:             "send_item",
 		Text:               text,
@@ -278,14 +265,7 @@ func (insta *Instagram) sendText(ctx context.Context, text, threadIDs, recipient
 		SendAttribution:    "direct_thread",
 		ThreadIDs:          threadIDs,
 		RecipientUsers:     recipients,
-	})
-	if err != nil {
-		return nil, err
-	}
-	var resp struct {
-		Payload DirectSent `json:"payload"`
-	}
-	if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlDirectSendText, IsPost: true, Query: q}, &resp); err != nil {
+	}}, &resp); err != nil {
 		return nil, err
 	}
 	return &resp.Payload, nil
@@ -302,20 +282,16 @@ type itemSeenForm struct {
 // MarkSeen marks the thread read up to item.
 func (t *Thread) MarkSeen(ctx context.Context, item *DirectItem) error {
 	otid := offlineThreadingID()
-	q, err := formOf(itemSeenForm{
-		UUID:               t.insta.uuid,
-		Action:             "mark_seen",
-		ThreadID:           t.ThreadID,
-		ClientContext:      otid,
-		OfflineThreadingID: otid,
-	})
-	if err != nil {
-		return err
-	}
-	_, err = t.insta.call(ctx, &reqOptions{
+	_, err := t.insta.call(ctx, &reqOptions{
 		Endpoint: fmt.Sprintf(urlDirectItemSeen, t.ThreadID, item.ItemID),
 		IsPost:   true,
-		Query:    q,
+		Form: itemSeenForm{
+			UUID:               t.insta.uuid,
+			Action:             "mark_seen",
+			ThreadID:           t.ThreadID,
+			ClientContext:      otid,
+			OfflineThreadingID: otid,
+		},
 	})
 	return err
 }

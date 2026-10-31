@@ -100,6 +100,39 @@ const (
 	urlConfigureClips   = "media/configure_to_clips/?video=1"
 	urlUploadVideo      = "rupload_igvideo/%s" // relative to baseURL
 	urlPDQHash          = "media/update_media_with_pdq_hash_info/"
+
+	urlEditMedia            = "media/%s/edit_media/"
+	urlDisableComments      = "media/%s/disable_comments/"
+	urlEnableComments       = "media/%s/enable_comments/"
+	urlCountsVisibility     = "media/update_like_and_view_counts_visibility/"
+	urlClipDownloadsEnabled = "clips/item/set_third_party_downloads_enabled/"
+	urlClipRemixAllowed     = "clips/item/set_mashups_allowed/"
+	urlUndoOnlyMe           = "media/%s/undo_only_me/"
+	urlPinComment           = "media/%s/pin_comment/%s/"
+	urlUnpinComment         = "media/%s/unpin_comment/%s/"
+	urlMediaLikers          = "media/%s/likers/"
+	urlMediaInfo            = "media/%s/info/"
+
+	urlBlock          = "friendships/block/%d/"
+	urlUnblock        = "friendships/unblock/%d/"
+	urlBlockedList    = "users/blocked_list/"
+	urlSetBesties     = "friendships/set_besties/"
+	urlMuteFollow     = "friendships/mute_posts_or_story_from_follow/"
+	urlUnmuteFollow   = "friendships/unmute_posts_or_story_from_follow/"
+	urlRemoveFollower = "friendships/remove_follower/%d/"
+
+	urlUserTagsFeed  = "usertags/%d/feed/"
+	urlUserTagRemove = "usertags/%s/remove/"
+
+	urlLocationSearch   = "location_search/"
+	urlLocationInfo     = "locations/%d/info/"
+	urlLocationSections = "locations/%d/sections/"
+
+	urlDirectInbox        = "direct_v2/inbox/"
+	urlDirectPendingInbox = "direct_v2/pending_inbox/"
+	urlDirectThread       = "direct_v2/threads/%s/"
+	urlDirectSendText     = "direct_v2/threads/broadcast/text/"
+	urlDirectItemSeen     = "direct_v2/threads/%s/items/%s/seen/"
 )
 
 var (

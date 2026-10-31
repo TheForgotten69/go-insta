@@ -7,22 +7,6 @@ import (
 	"fmt"
 )
 
-const (
-	urlBlock          = "friendships/block/%d/"
-	urlUnblock        = "friendships/unblock/%d/"
-	urlBlockedList    = "users/blocked_list/"
-	urlSetBesties     = "friendships/set_besties/"
-	urlMuteFollow     = "friendships/mute_posts_or_story_from_follow/"
-	urlUnmuteFollow   = "friendships/unmute_posts_or_story_from_follow/"
-	urlRemoveFollower = "friendships/remove_follower/%d/"
-
-	// client_doc_ids from assets/ig4a-instagram-schema_client_persist_ids.json; the
-	// "instagram" schema goes to graphql_www, "distillery" to graphql/query.
-	docPendingFollows       = "33138429313628334965326831157"
-	docApproveFollowRequest = "356404437015335956218183369113"
-	docIgnoreFollowRequest  = "1956506636707216159350023433"
-)
-
 type blockRequest struct {
 	sessionIDs
 	UserID             string `json:"user_id"`
@@ -58,12 +42,8 @@ func (user *User) Unblock(ctx context.Context) error {
 
 // postFriendship posts a signed body and stores the returned friendship_status.
 func (user *User) postFriendship(ctx context.Context, endpoint string, payload any) error {
-	q, err := signedBody(payload)
-	if err != nil {
-		return err
-	}
 	var resp friendResp
-	if err := user.insta.callJSON(ctx, &reqOptions{Endpoint: endpoint, IsPost: true, Query: q}, &resp); err != nil {
+	if err := user.insta.callJSON(ctx, &reqOptions{Endpoint: endpoint, IsPost: true, Signed: payload}, &resp); err != nil {
 		return err
 	}
 	user.Friendship = resp.Friendship
@@ -91,15 +71,11 @@ func (account *Account) BlockedUsers(ctx context.Context) ([]BlockedUser, error)
 	var all []BlockedUser
 	cursor := ""
 	for range maxBlockedPages {
-		q, err := formOf(maxIDForm{MaxID: cursor})
-		if err != nil {
-			return nil, err
-		}
 		var page struct {
 			BlockedList []BlockedUser `json:"blocked_list"`
 			NextMaxID   string        `json:"next_max_id"`
 		}
-		if err := account.insta.callJSON(ctx, &reqOptions{Endpoint: urlBlockedList, Query: q}, &page); err != nil {
+		if err := account.insta.callJSON(ctx, &reqOptions{Endpoint: urlBlockedList, Form: maxIDForm{MaxID: cursor}}, &page); err != nil {
 			return nil, err
 		}
 		all = append(all, page.BlockedList...)
@@ -125,18 +101,14 @@ func (account *Account) UpdateCloseFriends(ctx context.Context, add, remove []*U
 	if len(add) == 0 && len(remove) == 0 {
 		return errors.New("close friends: nothing to add or remove")
 	}
-	q, err := signedBody(setBestiesRequest{
+	_, err := account.insta.call(ctx, &reqOptions{Endpoint: urlSetBesties, IsPost: true, Signed: setBestiesRequest{
 		sessionIDs:                 account.insta.sessionIDs(),
 		Source:                     "audience_dialog",
 		Module:                     "audience_selection",
 		BlockOnEmptyThreadCreation: "false",
 		Add:                        userIDs(add),
 		Remove:                     userIDs(remove),
-	})
-	if err != nil {
-		return err
-	}
-	_, err = account.insta.call(ctx, &reqOptions{Endpoint: urlSetBesties, IsPost: true, Query: q})
+	}})
 	return err
 }
 
@@ -207,22 +179,15 @@ type pendingFollowsVars struct {
 // PendingFollowRequests returns the users waiting for the (private) account to
 // accept their follow request; first page only, as the app's request screen.
 func (account *Account) PendingFollowRequests(ctx context.Context) ([]*User, error) {
-	body, err := account.insta.graphQL(ctx, gqlQuery{friendly: "PendingFollows", docID: docPendingFollows,
-		root: "xdt_friendships_pending_users"}, pendingFollowsVars{PageSize: 20, ExcludeSuggestedUsers: true})
+	var pending struct {
+		Users json.RawMessage `json:"users"`
+	}
+	err := account.insta.graphQLRoot(ctx, gqlQuery{friendly: "PendingFollows", docID: docPendingFollows,
+		root: "xdt_friendships_pending_users"}, pendingFollowsVars{PageSize: 20, ExcludeSuggestedUsers: true}, &pending)
 	if err != nil {
 		return nil, err
 	}
-	var resp struct {
-		Data struct {
-			Pending struct {
-				Users json.RawMessage `json:"users"`
-			} `json:"xdt_friendships_pending_users"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, err
-	}
-	users, err := decodeUserConnection(resp.Data.Pending.Users)
+	users, err := decodeUserConnection(pending.Users)
 	if err != nil {
 		return nil, err
 	}

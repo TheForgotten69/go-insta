@@ -5,11 +5,6 @@ import (
 	"fmt"
 )
 
-const (
-	urlUserTagsFeed  = "usertags/%d/feed/"
-	urlUserTagRemove = "usertags/%s/remove/"
-)
-
 type userTagsQuery struct {
 	Count string `json:"count"`
 	MaxID string `json:"max_id,omitempty"`
@@ -20,18 +15,14 @@ func (user *User) TaggedPosts() *Pager[*Item] {
 	var nextID string
 	var pos int
 	return newPager(func(ctx context.Context) ([]*Item, string, error) {
-		q, err := formOf(userTagsQuery{Count: "12", MaxID: nextID})
-		if err != nil {
-			return nil, "", err
-		}
 		var resp struct {
 			Items         []*Item `json:"items"`
 			MoreAvailable bool    `json:"more_available"`
 			NextMaxID     string  `json:"next_max_id"`
 		}
-		err = user.insta.callJSON(ctx, &reqOptions{
+		err := user.insta.callJSON(ctx, &reqOptions{
 			Endpoint:     fmt.Sprintf(urlUserTagsFeed, user.ID),
-			Query:        q,
+			Form:         userTagsQuery{Count: "12", MaxID: nextID},
 			ExtraHeaders: map[string]string{"X_IG_FETCH_AAT": "true"},
 		}, &resp)
 		if err != nil {
@@ -55,10 +46,10 @@ type userTagRemoveRequest struct {
 
 // RemoveTag removes the account's own people tag from the post.
 func (item *Item) RemoveTag(ctx context.Context) error {
-	_, err := item.postSigned(ctx, fmt.Sprintf(urlUserTagRemove, item.ID), userTagRemoveRequest{
+	_, err := item.insta.call(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlUserTagRemove, item.ID), IsPost: true, Signed: userTagRemoveRequest{
 		sessionIDs:      item.insta.sessionIDs(),
 		MediaID:         item.ID,
 		ContainerModule: "feed_contextual_self_profile",
-	}, nil)
+	}})
 	return err
 }

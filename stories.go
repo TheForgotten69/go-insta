@@ -97,14 +97,11 @@ const maxHighlightPages = 100
 func (user *User) Highlights(ctx context.Context) ([]*Reel, error) {
 	var reels []*Reel
 	endpoint := fmt.Sprintf(urlUserHighlights, user.ID)
-	q, err := formOf(highlightsTrayQuery{
+	var query any = highlightsTrayQuery{
 		CheckHighlightsSubtabGating: "false",
 		FetchHighResCoverImage:      "true",
 		MaxHighlightsPerPage:        "10",
 		SupportedCapabilitiesNew:    supportedCapabilities,
-	})
-	if err != nil {
-		return nil, err
 	}
 	cursor, hint := "", "feed"
 	for range maxHighlightPages {
@@ -112,11 +109,11 @@ func (user *User) Highlights(ctx context.Context) ([]*Reel, error) {
 			Reels  []*Reel `json:"tray"`
 			Cursor string  `json:"cursor"`
 		}
-		err = user.insta.callJSON(ctx, &reqOptions{
+		err := user.insta.callJSON(ctx, &reqOptions{
 			Endpoint:     endpoint,
 			Stream:       true,
 			ExtraHeaders: map[string]string{"X-Ig-Accept-Hint": hint},
-			Query:        q,
+			Form:         query,
 		}, &page)
 		if err != nil {
 			return nil, err
@@ -130,13 +127,10 @@ func (user *User) Highlights(ctx context.Context) ([]*Reel, error) {
 		}
 		cursor = page.Cursor
 		endpoint, hint = fmt.Sprintf(urlUserHighlightsPage, user.ID), "image-grid"
-		q, err = formOf(highlightsPageQuery{
+		query = highlightsPageQuery{
 			Cursor:                   cursor,
 			MaxHighlightsPerPage:     "10",
 			SupportedCapabilitiesNew: supportedCapabilities,
-		})
-		if err != nil {
-			return nil, err
 		}
 	}
 	return nil, fmt.Errorf("highlights: still paging after %d pages", maxHighlightPages)
@@ -264,14 +258,10 @@ func (reel *Reel) Delete(ctx context.Context) error {
 	if !reel.isHighlight() {
 		return ErrNotHighlight
 	}
-	q, err := signedBody(reel.insta.sessionIDs())
-	if err != nil {
-		return err
-	}
-	_, err = reel.insta.call(ctx, &reqOptions{
+	_, err := reel.insta.call(ctx, &reqOptions{
 		Endpoint:      fmt.Sprintf(urlHighlightDelete, reel.ReelID()),
 		IsPost:        true,
-		Query:         q,
+		Signed:        reel.insta.sessionIDs(),
 		IgnoreHeaders: []string{"X-Tigon-Is-Retry"}, // absent on delete_reel in the capture
 	})
 	return err
@@ -296,25 +286,15 @@ func (reel *Reel) setArchived(ctx context.Context, gq gqlQuery) error {
 	if !reel.isHighlight() {
 		return ErrNotHighlight
 	}
-	body, err := reel.insta.graphQL(ctx, gq, highlightIDVars{HighlightID: reel.ReelID()})
-	if err != nil {
+	var r struct {
+		Success      bool   `json:"success"`
+		ErrorMessage string `json:"error_message"`
+	}
+	if err := reel.insta.graphQLRoot(ctx, gq, highlightIDVars{HighlightID: reel.ReelID()}, &r); err != nil {
 		return err
 	}
-	var resp struct {
-		Data map[string]*struct {
-			Success      bool   `json:"success"`
-			ErrorMessage string `json:"error_message"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return err
-	}
-	if r := resp.Data[gq.root]; r == nil || !r.Success {
-		msg := "no result"
-		if r != nil {
-			msg = r.ErrorMessage
-		}
-		return fmt.Errorf("%s: %s", gq.root, msg)
+	if !r.Success {
+		return fmt.Errorf("%s: %s", gq.root, r.ErrorMessage)
 	}
 	return nil
 }
@@ -325,14 +305,10 @@ func (reel *Reel) isHighlight() bool {
 
 // postHighlight sends a request that embeds highlightBase and decodes the reel it returns.
 func (insta *Instagram) postHighlight(ctx context.Context, endpoint string, req any) (*Reel, error) {
-	q, err := signedBody(req)
-	if err != nil {
-		return nil, err
-	}
 	var resp struct {
 		Reel Reel `json:"reel"`
 	}
-	if err := insta.callJSON(ctx, &reqOptions{Endpoint: endpoint, IsPost: true, Query: q}, &resp); err != nil {
+	if err := insta.callJSON(ctx, &reqOptions{Endpoint: endpoint, IsPost: true, Signed: req}, &resp); err != nil {
 		return nil, err
 	}
 	resp.Reel.setValues(insta)
@@ -410,11 +386,7 @@ func (insta *Instagram) fetchStories(ctx context.Context, id int64) (*Reel, erro
 	var resp struct {
 		Reel Reel `json:"reel"`
 	}
-	q, err := formOf(capabilitiesQuery{SupportedCapabilitiesNew: supportedCapabilities})
-	if err != nil {
-		return nil, err
-	}
-	err = insta.callJSON(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlUserStories, id), Query: q}, &resp)
+	err := insta.callJSON(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlUserStories, id), Form: capabilitiesQuery{SupportedCapabilitiesNew: supportedCapabilities}}, &resp)
 	if err != nil {
 		return nil, err
 	}
@@ -469,24 +441,20 @@ type reelsMediaStreamRequest struct {
 
 // FetchReels loads the items of the given reels (user ids or "highlight:<id>").
 func (insta *Instagram) FetchReels(ctx context.Context, reelIDs ...string) (map[string]*Reel, error) {
-	q, err := signedBody(reelsMediaStreamRequest{
-		sessionIDs:               insta.sessionIDs(),
-		BatchSize:                "0",
-		ExcludeMediaIDs:          "[]",
-		Reason:                   "on_tap",
-		ReelIDs:                  reelIDs,
-		Source:                   "profile",
-		SupportedCapabilitiesNew: supportedCapabilities,
-	})
-	if err != nil {
-		return nil, err
-	}
 	// Each line carries one reel, or client_hints with an empty reels map.
 	reels := make(map[string]*Reel, len(reelIDs))
-	err = insta.callLines(ctx, &reqOptions{
-		Endpoint:     urlReelsMediaStream,
-		IsPost:       true,
-		Query:        q,
+	err := insta.callLines(ctx, &reqOptions{
+		Endpoint: urlReelsMediaStream,
+		IsPost:   true,
+		Signed: reelsMediaStreamRequest{
+			sessionIDs:               insta.sessionIDs(),
+			BatchSize:                "0",
+			ExcludeMediaIDs:          "[]",
+			Reason:                   "on_tap",
+			ReelIDs:                  reelIDs,
+			Source:                   "profile",
+			SupportedCapabilitiesNew: supportedCapabilities,
+		},
 		ExtraHeaders: map[string]string{"X-Ig-Accept-Hint": "feed"},
 	}, func(line []byte) error {
 		var chunk struct {
@@ -543,22 +511,18 @@ func (reel *Reel) MarkSeen(ctx context.Context, items ...*Item) error {
 	if reel.isHighlight() {
 		module = "highlight_profile"
 	}
-	q, err := signedBody(mediaSeenRequest{
-		sessionIDs:        insta.sessionIDs(),
-		ContainerModule:   module,
-		ForceSeenStoryIDs: []string{},
-		Reels:             reels,
-	})
-	if err != nil {
-		return err
-	}
-	_, err = insta.call(ctx, &reqOptions{
+	_, err := insta.call(ctx, &reqOptions{
 		Endpoint:     urlMediaSeenV2 + "?reel=1&live_vod=0",
 		FriendlyName: "IgApi: media/seen/?reel=1&live_vod=0",
 		UseV2:        true,
 		IsPost:       true,
 		Gzip:         true,
-		Query:        q,
+		Signed: mediaSeenRequest{
+			sessionIDs:        insta.sessionIDs(),
+			ContainerModule:   module,
+			ForceSeenStoryIDs: []string{},
+			Reels:             reels,
+		},
 	})
 	return err
 }
@@ -578,7 +542,7 @@ func (item *Item) LikeStory(ctx context.Context) error {
 	if item.module != "" && item.module != "reel_feed_timeline" {
 		module = item.module
 	}
-	q, err := signedBody(storyLikeRequest{
+	_, err := item.insta.call(ctx, &reqOptions{Endpoint: urlStoryLike, IsPost: true, Signed: storyLikeRequest{
 		sessionIDs:      item.insta.sessionIDs(),
 		ContainerModule: module,
 		DeliveryClass:   item.deliveryClass(),
@@ -586,10 +550,6 @@ func (item *Item) LikeStory(ctx context.Context) error {
 		TrayPosition:    strconv.Itoa(item.Index),
 		TraySessionID:   generateUUID(),
 		ViewerSessionID: generateUUID(),
-	})
-	if err != nil {
-		return err
-	}
-	_, err = item.insta.call(ctx, &reqOptions{Endpoint: urlStoryLike, IsPost: true, Query: q})
+	}})
 	return err
 }

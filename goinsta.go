@@ -231,7 +231,8 @@ type logoutRequest struct {
 // Logout ends the session server-side. The session's token is invalid afterward;
 // the returned nonce allows a later one-tap re-login from the same device.
 func (insta *Instagram) Logout(ctx context.Context) (*LogoutResult, error) {
-	q, err := formOf(logoutRequest{
+	var r LogoutResult
+	err := insta.callJSON(ctx, &reqOptions{Endpoint: urlLogout, IsPost: true, Form: logoutRequest{
 		UUID:                      insta.uuid,
 		CloudAccountID:            insta.uuid,
 		DeviceID:                  insta.dID,
@@ -240,12 +241,7 @@ func (insta *Instagram) Logout(ctx context.Context) (*LogoutResult, error) {
 		OneTapAppLogin:            "true",
 		PhoneID:                   insta.fID,
 		PreventRemoveDeviceFromWA: "true",
-	})
-	if err != nil {
-		return nil, err
-	}
-	var r LogoutResult
-	err = insta.callJSON(ctx, &reqOptions{Endpoint: urlLogout, IsPost: true, Query: q}, &r)
+	}}, &r)
 	if err != nil {
 		return nil, err
 	}

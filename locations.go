@@ -2,16 +2,9 @@ package goinsta
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
-)
-
-const (
-	urlLocationSearch   = "location_search/"
-	urlLocationInfo     = "locations/%d/info/"
-	urlLocationSections = "locations/%d/sections/"
 )
 
 type locationSearchQuery struct {
@@ -33,14 +26,10 @@ type venue struct {
 // SearchLocations finds places by name around lat/lng; 0, 0 searches without a
 // position, as the app does without location access.
 func (insta *Instagram) SearchLocations(ctx context.Context, query string, lat, lng float64) ([]Location, error) {
-	q, err := formOf(locationSearchQuery{SearchQuery: query, Latitude: coordinate(lat, lng, lat), Longitude: coordinate(lat, lng, lng)})
-	if err != nil {
-		return nil, err
-	}
 	var resp struct {
 		Venues []venue `json:"venues"`
 	}
-	if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlLocationSearch, Query: q}, &resp); err != nil {
+	if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlLocationSearch, Form: locationSearchQuery{SearchQuery: query, Latitude: coordinate(lat, lng, lat), Longitude: coordinate(lat, lng, lng)}}, &resp); err != nil {
 		return nil, err
 	}
 	out := make([]Location, len(resp.Venues))
@@ -75,7 +64,7 @@ func (insta *Instagram) LocationInfo(ctx context.Context, id int64) (*Location, 
 		return nil, err
 	}
 	if resp.Location == nil {
-		return nil, errors.New("location info: no location in response")
+		return nil, fmt.Errorf("location %d: %w", id, ErrEmptyResponse)
 	}
 	return resp.Location, nil
 }
@@ -115,13 +104,6 @@ func (insta *Instagram) LocationFeed(id int64, tab LocationTab) *Pager[*Item] {
 	var maxID, page, nextIDs string
 	var pos int
 	return newPager(func(ctx context.Context) ([]*Item, string, error) {
-		q, err := formOf(locationSectionsRequest{
-			UUID: insta.uuid, SessionID: sessionID, Tab: string(tab), ExcludeBloksWidgets: "true",
-			MaxID: maxID, Page: page, NextMediaIDs: nextIDs,
-		})
-		if err != nil {
-			return nil, "", err
-		}
 		var resp struct {
 			Sections      []locationSection `json:"sections"`
 			MoreAvailable bool              `json:"more_available"`
@@ -129,7 +111,10 @@ func (insta *Instagram) LocationFeed(id int64, tab LocationTab) *Pager[*Item] {
 			NextPage      int               `json:"next_page"`
 			NextMediaIDs  []Int64           `json:"next_media_ids"`
 		}
-		err = insta.callJSON(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlLocationSections, id), IsPost: true, Query: q}, &resp)
+		err := insta.callJSON(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlLocationSections, id), IsPost: true, Form: locationSectionsRequest{
+			UUID: insta.uuid, SessionID: sessionID, Tab: string(tab), ExcludeBloksWidgets: "true",
+			MaxID: maxID, Page: page, NextMediaIDs: nextIDs,
+		}}, &resp)
 		if err != nil {
 			return nil, "", err
 		}

@@ -110,14 +110,10 @@ func (account *Account) SetStoryAutoArchive(ctx context.Context, on bool) error 
 	if on {
 		v = "on"
 	}
-	q, err := signedBody(reelSettingsRequest{
+	_, err := account.insta.call(ctx, &reqOptions{Endpoint: urlSetReelSettings, IsPost: true, Signed: reelSettingsRequest{
 		sessionIDs:      sessionIDs{UID: account.ID.String(), UUID: account.insta.uuid},
 		ReelAutoArchive: v,
-	})
-	if err != nil {
-		return err
-	}
-	_, err = account.insta.call(ctx, &reqOptions{Endpoint: urlSetReelSettings, IsPost: true, Query: q})
+	}})
 	return err
 }
 
@@ -147,16 +143,12 @@ func (account *Account) SuggestedUsers(ctx context.Context) ([]*User, error) {
 			} `json:"suggestions"`
 		} `json:"suggested_users"`
 	}
-	q, err := formOf(aymlRequest{
+	err := account.insta.callJSON(ctx, &reqOptions{Endpoint: urlDiscoverAYML, IsPost: true, Form: aymlRequest{
 		UUID:                 account.insta.uuid,
 		Module:               "self_profile",
 		PhoneID:              account.insta.fID,
 		ProfileChainingCheck: "true",
-	})
-	if err != nil {
-		return nil, err
-	}
-	err = account.insta.callJSON(ctx, &reqOptions{Endpoint: urlDiscoverAYML, IsPost: true, Query: q}, &resp)
+	}}, &resp)
 	if err != nil {
 		return nil, err
 	}

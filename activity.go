@@ -143,12 +143,8 @@ func (insta *Instagram) Activity() *Activity {
 			req.LastChecked = fmt.Sprintf("%f", last.LastChecked)
 			req.FirstRecordTimestamp = fmt.Sprintf("%f", last.FirstRecTs)
 		}
-		query, err := formOf(req)
-		if err != nil {
-			return nil, "", err
-		}
 		var page activityPage
-		if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlActivityRecent, Query: query}, &page); err != nil {
+		if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlActivityRecent, Form: req}, &page); err != nil {
 			return nil, "", err
 		}
 		var items []RecentItems
@@ -167,11 +163,7 @@ func (insta *Instagram) Activity() *Activity {
 }
 
 func (insta *Instagram) MarkActivitySeen(ctx context.Context) error {
-	q, err := formOf(uuidForm{UUID: insta.uuid})
-	if err != nil {
-		return err
-	}
-	_, err = insta.call(ctx, &reqOptions{Endpoint: urlActivitySeen, IsPost: true, Query: q})
+	_, err := insta.call(ctx, &reqOptions{Endpoint: urlActivitySeen, IsPost: true, Form: uuidForm{UUID: insta.uuid}})
 	return err
 }
 

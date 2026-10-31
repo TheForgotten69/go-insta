@@ -42,7 +42,11 @@ type reqOptions struct {
 
 	FriendlyName string
 
-	Query map[string]string
+	// Query is the raw wire form (POST body or URL query). Form and Signed are
+	// request structs encoded into it: Form field by field, Signed as signed_body.
+	Query  map[string]string
+	Form   any
+	Signed any
 
 	DataBytes []byte
 
@@ -149,13 +153,17 @@ func (insta *Instagram) newRequest(ctx context.Context, o *reqOptions) (*http.Re
 		return nil, err
 	}
 
+	params, err := o.params()
+	if err != nil {
+		return nil, err
+	}
 	var body io.Reader
 	method := http.MethodGet
 	if o.IsPost {
 		method = http.MethodPost
 		raw := o.DataBytes
 		if raw == nil {
-			raw = []byte(encodeQuery(o.Query))
+			raw = []byte(encodeQuery(params))
 		}
 		if o.Gzip {
 			if raw, err = gzipBytes(raw); err != nil {
@@ -163,9 +171,9 @@ func (insta *Instagram) newRequest(ctx context.Context, o *reqOptions) (*http.Re
 			}
 		}
 		body = bytes.NewReader(raw)
-	} else if len(o.Query) > 0 {
+	} else if len(params) > 0 {
 		q := u.Query()
-		for k, v := range o.Query {
+		for k, v := range params {
 			q.Set(k, v)
 		}
 		u.RawQuery = q.Encode()
@@ -233,6 +241,42 @@ func (insta *Instagram) newRequest(ctx context.Context, o *reqOptions) (*http.Re
 	}
 	req.Header = h
 	return req, nil
+}
+
+// params merges Query, Signed and Form into one wire form.
+func (o *reqOptions) params() (map[string]string, error) {
+	if o.Form == nil && o.Signed == nil {
+		return o.Query, nil
+	}
+	out := make(map[string]string, len(o.Query)+8)
+	add := func(m map[string]string) error {
+		for k, v := range m {
+			if _, dup := out[k]; dup {
+				return fmt.Errorf("%s: form field %q set twice", o.Endpoint, k)
+			}
+			out[k] = v
+		}
+		return nil
+	}
+	if err := add(o.Query); err != nil {
+		return nil, err
+	}
+	for _, enc := range []struct {
+		v      any
+		encode func(any) (map[string]string, error)
+	}{{o.Signed, signedBody}, {o.Form, formOf}} {
+		if enc.v == nil {
+			continue
+		}
+		m, err := enc.encode(enc.v)
+		if err != nil {
+			return nil, err
+		}
+		if err := add(m); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func encodeQuery(q map[string]string) string {

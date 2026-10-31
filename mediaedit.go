@@ -6,20 +6,6 @@ import (
 	"fmt"
 )
 
-const (
-	urlEditMedia            = "media/%s/edit_media/"
-	urlDisableComments      = "media/%s/disable_comments/"
-	urlEnableComments       = "media/%s/enable_comments/"
-	urlCountsVisibility     = "media/update_like_and_view_counts_visibility/"
-	urlClipDownloadsEnabled = "clips/item/set_third_party_downloads_enabled/"
-	urlClipRemixAllowed     = "clips/item/set_mashups_allowed/"
-	urlUndoOnlyMe           = "media/%s/undo_only_me/"
-	urlPinComment           = "media/%s/pin_comment/%s/"
-	urlUnpinComment         = "media/%s/unpin_comment/%s/"
-	urlMediaLikers          = "media/%s/likers/"
-	urlMediaInfo            = "media/%s/info/"
-)
-
 // MediaEdit is one save of a post's "Edit" screen. Caption replaces the whole
 // caption, so pass the current one to keep it.
 type MediaEdit struct {
@@ -62,7 +48,7 @@ func (item *Item) Edit(ctx context.Context, e MediaEdit) error {
 	if len(e.ChildOrder) > 0 {
 		req.ChildrenInOrder = mediaIDList(e.ChildOrder)
 	}
-	body, err := item.postSigned(ctx, fmt.Sprintf(urlEditMedia, item.ID), req, nil)
+	body, err := item.insta.call(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlEditMedia, item.ID), IsPost: true, Signed: req})
 	if err != nil {
 		return err
 	}
@@ -80,12 +66,12 @@ func (item *Item) Edit(ctx context.Context, e MediaEdit) error {
 }
 
 func (item *Item) DisableComments(ctx context.Context) error {
-	_, err := item.postSigned(ctx, fmt.Sprintf(urlDisableComments, item.ID), item.insta.sessionIDs(), nil)
+	_, err := item.insta.call(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlDisableComments, item.ID), IsPost: true, Signed: item.insta.sessionIDs()})
 	return err
 }
 
 func (item *Item) EnableComments(ctx context.Context) error {
-	_, err := item.postSigned(ctx, fmt.Sprintf(urlEnableComments, item.ID), item.insta.sessionIDs(), nil)
+	_, err := item.insta.call(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlEnableComments, item.ID), IsPost: true, Signed: item.insta.sessionIDs()})
 	return err
 }
 
@@ -98,12 +84,12 @@ type countsVisibilityRequest struct {
 
 // SetCountsHidden hides or shows the like/view and share counts of an own post.
 func (item *Item) SetCountsHidden(ctx context.Context, likes, shares bool) error {
-	_, err := item.postSigned(ctx, urlCountsVisibility, countsVisibilityRequest{
+	_, err := item.insta.call(ctx, &reqOptions{Endpoint: urlCountsVisibility, IsPost: true, Signed: countsVisibilityRequest{
 		sessionIDs:                item.insta.sessionIDs(),
 		LikeAndViewCountsDisabled: fmt.Sprint(likes),
 		ShareCountDisabled:        fmt.Sprint(shares),
 		MediaID:                   item.ID,
-	}, nil)
+	}})
 	return err
 }
 
@@ -116,22 +102,13 @@ type clipDownloadsRequest struct {
 
 // SetDownloads allows or blocks downloading one of the account's own Reels.
 func (item *Item) SetDownloads(ctx context.Context, allowed bool) error {
-	return item.postForm(ctx, urlClipDownloadsEnabled, clipDownloadsRequest{
+	// clips/item settings take the numeric media id in a plain form and answer 400 to "<pk>_<owner>".
+	_, err := item.insta.call(ctx, &reqOptions{Endpoint: urlClipDownloadsEnabled, IsPost: true, Form: clipDownloadsRequest{
 		sessionIDs:                 item.insta.sessionIDs(),
 		MediaID:                    item.pk(),
 		ThirdPartyDownloadsEnabled: fmt.Sprint(allowed),
 		ContainerModule:            "clips_viewer_clips_tab",
-	})
-}
-
-// postForm posts req as a plain form; the clips/item settings take the numeric
-// media id this way and answer 400 to "<pk>_<owner>".
-func (item *Item) postForm(ctx context.Context, endpoint string, req any) error {
-	q, err := formOf(req)
-	if err != nil {
-		return err
-	}
-	_, err = item.insta.call(ctx, &reqOptions{Endpoint: endpoint, IsPost: true, Query: q})
+	}})
 	return err
 }
 
@@ -145,18 +122,19 @@ type clipRemixRequest struct {
 
 // SetRemixAllowed allows or blocks remixes of one of the account's own Reels.
 func (item *Item) SetRemixAllowed(ctx context.Context, allowed bool) error {
-	return item.postForm(ctx, urlClipRemixAllowed, clipRemixRequest{
+	_, err := item.insta.call(ctx, &reqOptions{Endpoint: urlClipRemixAllowed, IsPost: true, Form: clipRemixRequest{
 		sessionIDs:      item.insta.sessionIDs(),
 		ClipsMediaID:    item.pk(),
 		MediaID:         item.pk(),
 		MashupsAllowed:  fmt.Sprint(allowed),
 		ContainerModule: "clips_viewer_clips_tab",
-	})
+	}})
+	return err
 }
 
 // Unarchive shows an archived post on the profile again (undoes Archive).
 func (item *Item) Unarchive(ctx context.Context) error {
-	_, err := item.postSigned(ctx, fmt.Sprintf(urlUndoOnlyMe, item.ID), mediaIDRequest{item.insta.sessionIDs(), item.ID}, nil)
+	_, err := item.insta.call(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlUndoOnlyMe, item.ID), IsPost: true, Signed: mediaIDRequest{item.insta.sessionIDs(), item.ID}})
 	return err
 }
 
@@ -173,7 +151,7 @@ func (c *Comment) post(ctx context.Context, endpoint string) error {
 	if c.item == nil {
 		return fmt.Errorf("comment %v has no parent media", c.ID)
 	}
-	_, err := c.item.postSigned(ctx, fmt.Sprintf(endpoint, c.item.ID, c.getid()), c.item.insta.sessionIDs(), nil)
+	_, err := c.item.insta.call(ctx, &reqOptions{Endpoint: fmt.Sprintf(endpoint, c.item.ID, c.getid()), IsPost: true, Signed: c.item.insta.sessionIDs()})
 	return err
 }
 

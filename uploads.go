@@ -246,15 +246,11 @@ type configureResp struct {
 }
 
 func (insta *Instagram) configure(ctx context.Context, endpoint string, payload any) (*Item, error) {
-	q, err := signedBody(payload)
-	if err != nil {
-		return nil, err
-	}
 	var resp configureResp
-	err = insta.callJSON(ctx, &reqOptions{
+	err := insta.callJSON(ctx, &reqOptions{
 		Endpoint: endpoint,
 		IsPost:   true,
-		Query:    q,
+		Signed:   payload,
 		Priority: "u=1, i",
 		ExtraHeaders: map[string]string{
 			"X-Fb-Request-Analytics-Tags": `{"network_tags":{"product":"` + insta.sess.AppID +

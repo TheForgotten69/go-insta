@@ -2,15 +2,6 @@ package goinsta
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"strings"
-)
-
-const (
-	docPostInsights      = "187673829817521675190278983686"
-	rootPostInsights     = "ig_post_insights"
-	friendlyPostInsights = "PostInsightsQuery"
 )
 
 // Insights are a post's metrics, as the app's post insights screen shows them;
@@ -46,36 +37,15 @@ type postInsightsVars struct {
 
 // Insights loads the post's metrics.
 func (item *Item) Insights(ctx context.Context) (*Insights, error) {
-	body, err := item.insta.graphQL(ctx, gqlQuery{
+	var in Insights
+	err := item.insta.graphQLRoot(ctx, gqlQuery{
 		url:      graphQLWWWURL,
 		friendly: friendlyPostInsights,
 		docID:    docPostInsights,
 		root:     rootPostInsights,
-	}, postInsightsVars{MediaIGID: item.pk(), BloksVersioningID: item.insta.sess.BloksVersionID})
+	}, postInsightsVars{MediaIGID: item.pk(), BloksVersioningID: item.insta.sess.BloksVersionID}, &in)
 	if err != nil {
 		return nil, err
 	}
-	return parseInsights(body)
-}
-
-// parseInsights reads the response; the root key is "ig_post_insights" live and
-// aliased ("1$ig_post_insights(bloks_versioning_id:…,media_igid:…)") in the capture.
-func parseInsights(body []byte) (*Insights, error) {
-	var resp struct {
-		Data map[string]json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, err
-	}
-	for k, raw := range resp.Data {
-		if k != rootPostInsights && !strings.Contains(k, rootPostInsights+"(") {
-			continue
-		}
-		var in Insights
-		if err := json.Unmarshal(raw, &in); err != nil {
-			return nil, err
-		}
-		return &in, nil
-	}
-	return nil, errors.New(rootPostInsights + ": no insights in response")
+	return &in, nil
 }

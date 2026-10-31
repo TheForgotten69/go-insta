@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"strconv"
 	"strings"
 )
@@ -45,22 +44,6 @@ func (item *Item) mediaContext() mediaContext {
 	}
 }
 
-// postSigned posts payload as the signed body; form, when not nil, adds plain form fields.
-func (item *Item) postSigned(ctx context.Context, endpoint string, payload, form any) ([]byte, error) {
-	q, err := signedBody(payload)
-	if err != nil {
-		return nil, err
-	}
-	if form != nil {
-		extra, err := formOf(form)
-		if err != nil {
-			return nil, err
-		}
-		maps.Copy(q, extra)
-	}
-	return item.insta.call(ctx, &reqOptions{Endpoint: endpoint, IsPost: true, Query: q})
-}
-
 type likeRequest struct {
 	mediaContext
 	MediaID           string `json:"media_id"`
@@ -74,7 +57,7 @@ type likeRequest struct {
 }
 
 func (item *Item) Like(ctx context.Context) error {
-	_, err := item.postSigned(ctx, fmt.Sprintf(urlMediaLike, item.ID), likeRequest{
+	_, err := item.insta.call(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlMediaLike, item.ID), IsPost: true, Signed: likeRequest{
 		mediaContext:    item.mediaContext(),
 		MediaID:         item.ID,
 		ContainerModule: item.containerModule(),
@@ -83,7 +66,7 @@ func (item *Item) Like(ctx context.Context) error {
 		IsCarouselAd:    "false",
 		Is2mEnabled:     "false",
 		IsFromSwipe:     "false",
-	}, likeForm{D: "0"})
+	}, Form: likeForm{D: "0"}})
 	return err
 }
 
@@ -105,14 +88,14 @@ type saveRequest struct {
 }
 
 func (item *Item) Save(ctx context.Context) error {
-	_, err := item.postSigned(ctx, fmt.Sprintf(urlMediaSave, item.ID), saveRequest{
+	_, err := item.insta.call(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlMediaSave, item.ID), IsPost: true, Signed: saveRequest{
 		sessionIDs:           item.insta.sessionIDs(),
 		RadioType:            "ethernet-none",
 		DeliveryClass:        item.deliveryClass(),
 		FloatingContextItems: []string{},
 		ModuleName:           item.containerModule(),
 		ClientPosition:       strconv.Itoa(item.Index),
-	}, nil)
+	}})
 	return err
 }
 
@@ -137,7 +120,7 @@ type commentRequest struct {
 
 func (item *Item) Comment(ctx context.Context, text string) (*Comment, error) {
 	key := generateUUID()
-	body, err := item.postSigned(ctx, fmt.Sprintf(urlCommentAdd, item.ID), commentRequest{
+	body, err := item.insta.call(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlCommentAdd, item.ID), IsPost: true, Signed: commentRequest{
 		mediaContext:                 item.mediaContext(),
 		CommentText:                  text,
 		CommentCreationKey:           key,
@@ -154,7 +137,7 @@ func (item *Item) Comment(ctx context.Context, text string) (*Comment, error) {
 		ChainingSeedMediaID:          "null",
 		StartingClipsMediaID:         "null",
 		RankingSessionID:             generateUUID(),
-	}, nil)
+	}})
 	if err != nil {
 		return nil, err
 	}
@@ -185,10 +168,6 @@ func (c *Comments) fetch(ctx context.Context) ([]*Comment, string, error) {
 	if c.minID != "" {
 		query.MinID, query.SortOrder = c.minID, "popular"
 	}
-	q, err := formOf(query)
-	if err != nil {
-		return nil, "", err
-	}
 	// Each NDJSON line holds different comments under the same cursor.
 	var page struct {
 		Items                   []*Comment `json:"comments"`
@@ -199,9 +178,9 @@ func (c *Comments) fetch(ctx context.Context) ([]*Comment, string, error) {
 	}
 	var items []*Comment
 	seen := map[json.Number]bool{}
-	err = item.insta.callLines(ctx, &reqOptions{
+	err := item.insta.callLines(ctx, &reqOptions{
 		Endpoint: fmt.Sprintf(urlStreamComments, item.ID),
-		Query:    q,
+		Form:     query,
 	}, func(line []byte) error {
 		page.Items = nil
 		if err := json.Unmarshal(line, &page); err != nil {
@@ -266,7 +245,7 @@ func (c *Comment) Like(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.item.postSigned(ctx, fmt.Sprintf(urlCommentLike, c.getid()), req, nil)
+	_, err = c.item.insta.call(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlCommentLike, c.getid()), IsPost: true, Signed: req})
 	return err
 }
 
@@ -276,7 +255,7 @@ func (c *Comment) Unlike(ctx context.Context) error {
 		return err
 	}
 	req.MIx = strconv.Itoa(c.item.Index)
-	_, err = c.item.postSigned(ctx, fmt.Sprintf(urlCommentUnlike, c.getid()), req, nil)
+	_, err = c.item.insta.call(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlCommentUnlike, c.getid()), IsPost: true, Signed: req})
 	return err
 }
 
@@ -318,13 +297,13 @@ type bulkDeleteCommentsRequest struct {
 
 // DeleteComments removes comments by id (comment/bulk_delete).
 func (item *Item) DeleteComments(ctx context.Context, ids ...string) error {
-	_, err := item.postSigned(ctx, fmt.Sprintf(urlCommentBulkDelete, item.ID), bulkDeleteCommentsRequest{
+	_, err := item.insta.call(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlCommentBulkDelete, item.ID), IsPost: true, Signed: bulkDeleteCommentsRequest{
 		sessionIDs:          item.insta.sessionIDs(),
 		CommentIDsToDelete:  strings.Join(ids, ","),
 		ContainerModule:     "self_comments_v2_feed_contextual_self_profile",
 		ClientPosition:      strconv.Itoa(item.Index),
 		ChainingSeedMediaID: item.pk(),
-	}, nil)
+	}})
 	return err
 }
 
@@ -361,32 +340,24 @@ type mediaIDRequest struct {
 
 // Delete removes one of the account's own posts.
 func (item *Item) Delete(ctx context.Context) error {
-	q, err := signedBody(mediaDeleteRequest{sessionIDs: item.insta.sessionIDs(), IgtvFeedPreview: "false", MediaID: item.ID})
-	if err != nil {
-		return err
-	}
-	_, err = item.insta.call(ctx, &reqOptions{
+	_, err := item.insta.call(ctx, &reqOptions{
 		Endpoint:     fmt.Sprintf(urlMediaDelete, item.ID) + "?media_type=" + item.mediaTypeName(),
 		FriendlyName: "IgApi: " + fmt.Sprintf(urlMediaDelete, item.ID) + "?media_type=" + item.mediaTypeName(),
 		IsPost:       true,
-		Query:        q,
+		Signed:       mediaDeleteRequest{sessionIDs: item.insta.sessionIDs(), IgtvFeedPreview: "false", MediaID: item.ID},
 	})
 	return err
 }
 
 // Archive hides one of the account's own posts from the profile (only_me).
 func (item *Item) Archive(ctx context.Context) error {
-	_, err := item.postSigned(ctx, fmt.Sprintf(urlMediaOnlyMe, item.ID), mediaIDRequest{item.insta.sessionIDs(), item.ID}, nil)
+	_, err := item.insta.call(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlMediaOnlyMe, item.ID), IsPost: true, Signed: mediaIDRequest{item.insta.sessionIDs(), item.ID}})
 	return err
 }
 
 // Pin pins one of the account's own posts to the top of the profile grid.
 func (item *Item) Pin(ctx context.Context) error {
-	q, err := formOf(pinRequest{UUID: item.insta.uuid, PostID: item.pk()})
-	if err != nil {
-		return err
-	}
-	_, err = item.insta.call(ctx, &reqOptions{Endpoint: urlPinTimelineMedia, IsPost: true, Query: q})
+	_, err := item.insta.call(ctx, &reqOptions{Endpoint: urlPinTimelineMedia, IsPost: true, Form: pinRequest{UUID: item.insta.uuid, PostID: item.pk()}})
 	return err
 }
 
@@ -420,26 +391,22 @@ type createNoteRequest struct {
 
 // AddNote leaves a note on the media (the bubble shown over reels/posts).
 func (item *Item) AddNote(ctx context.Context, text string) (*Note, error) {
-	q, err := formOf(createNoteRequest{
-		UUID:                item.insta.uuid,
-		Audience:            "7",
-		CarouselIndex:       "-1",
-		ContainerModule:     item.containerModule(),
-		EventSource:         "ufi",
-		MediaClientPosition: strconv.Itoa(item.Index),
-		MediaID:             item.ID,
-		NoteStyle:           "13",
-		Text:                text,
-	})
-	if err != nil {
-		return nil, err
-	}
 	var n Note
-	err = item.insta.callJSON(ctx, &reqOptions{
+	err := item.insta.callJSON(ctx, &reqOptions{
 		Endpoint:     urlCreateNote,
 		FriendlyName: "IgApi: api/v1/media/create_note/v2/",
 		IsPost:       true,
-		Query:        q,
+		Form: createNoteRequest{
+			UUID:                item.insta.uuid,
+			Audience:            "7",
+			CarouselIndex:       "-1",
+			ContainerModule:     item.containerModule(),
+			EventSource:         "ufi",
+			MediaClientPosition: strconv.Itoa(item.Index),
+			MediaID:             item.ID,
+			NoteStyle:           "13",
+			Text:                text,
+		},
 	}, &n)
 	if err != nil {
 		return nil, err

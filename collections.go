@@ -36,10 +36,6 @@ func (c *Collection) Posts() *Pager[*Item] {
 	var nextID string
 	var pos int
 	return newPager(func(ctx context.Context) ([]*Item, string, error) {
-		q, err := formOf(maxIDQuery{MaxID: nextID})
-		if err != nil {
-			return nil, "", err
-		}
 		var resp struct {
 			Items []struct {
 				Media *Item `json:"media"`
@@ -47,7 +43,7 @@ func (c *Collection) Posts() *Pager[*Item] {
 			MoreAvailable bool   `json:"more_available"`
 			NextID        string `json:"next_max_id"`
 		}
-		if err := c.insta.callJSON(ctx, &reqOptions{Endpoint: endpoint, Query: q}, &resp); err != nil {
+		if err := c.insta.callJSON(ctx, &reqOptions{Endpoint: endpoint, Form: maxIDQuery{MaxID: nextID}}, &resp); err != nil {
 			return nil, "", err
 		}
 		nextID = resp.NextID
@@ -78,16 +74,12 @@ type collectionsQuery struct {
 func (insta *Instagram) Collections() *Pager[*Collection] {
 	var nextID string
 	return newPager(func(ctx context.Context) ([]*Collection, string, error) {
-		query, err := formOf(collectionsQuery{CollectionTypes: collectionTypes, MaxID: nextID})
-		if err != nil {
-			return nil, "", err
-		}
 		var resp struct {
 			Items         []*Collection `json:"items"`
 			MoreAvailable bool          `json:"more_available"`
 			NextID        string        `json:"next_max_id"`
 		}
-		if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlCollectionsList, Query: query}, &resp); err != nil {
+		if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlCollectionsList, Form: collectionsQuery{CollectionTypes: collectionTypes, MaxID: nextID}}, &resp); err != nil {
 			return nil, "", err
 		}
 		nextID = resp.NextID

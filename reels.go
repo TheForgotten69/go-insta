@@ -26,10 +26,6 @@ func (insta *Instagram) Reels() *Pager[*Item] {
 			req.MaxID, req.Reason = maxID, "tailload"
 			friendly += "_tail"
 		}
-		q, err := formOf(req)
-		if err != nil {
-			return nil, "", err
-		}
 		// Lines hold different reels; the last one carries the cursor.
 		var resp struct {
 			Items []struct {
@@ -42,11 +38,11 @@ func (insta *Instagram) Reels() *Pager[*Item] {
 		}
 		var items []*Item
 		seen := map[string]bool{}
-		err = insta.callLines(ctx, &reqOptions{
+		err := insta.callLines(ctx, &reqOptions{
 			Endpoint:     urlClipsDiscover,
 			FriendlyName: friendly,
 			IsPost:       true,
-			Query:        q,
+			Form:         req,
 			ExtraHeaders: map[string]string{
 				"X-Ig-Tail-Load-Request": strconv.FormatBool(maxID != ""),
 				"X-Fb-Request-Analytics-Tags": `{"network_tags":{"product":"` + insta.sess.AppID +
@@ -104,14 +100,10 @@ func (insta *Instagram) MarkReelsSeen(ctx context.Context, items ...*Item) error
 	if err != nil {
 		return err
 	}
-	q, err := signedBody(clipsSeenRequest{
+	_, err = insta.call(ctx, &reqOptions{Endpoint: urlClipsWriteSeen, IsPost: true, Signed: clipsSeenRequest{
 		sessionIDs:       insta.sessionIDs(),
 		Impressions:      string(impressions),
 		BlendImpressions: "[]",
-	})
-	if err != nil {
-		return err
-	}
-	_, err = insta.call(ctx, &reqOptions{Endpoint: urlClipsWriteSeen, IsPost: true, Query: q})
+	}})
 	return err
 }

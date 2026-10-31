@@ -219,17 +219,13 @@ func (user *User) Info(ctx context.Context) error {
 }
 
 func (user *User) Sync(ctx context.Context) error {
-	q, err := formOf(user.infoStreamQuery())
-	if err != nil {
-		return err
-	}
 	body, err := user.insta.call(ctx, &reqOptions{
 		Endpoint:     fmt.Sprintf(urlUserInfoStream, user.ID),
 		FriendlyName: "IgApi: user_info_stream_by_id",
 		IsPost:       true,
 		Stream:       true,
 		Priority:     "u=0",
-		Query:        q,
+		Form:         user.infoStreamQuery(),
 		ExtraHeaders: map[string]string{"X-Ig-Accept-Hint": "image-grid"},
 	})
 	if err != nil {
@@ -290,7 +286,7 @@ func (user *User) Unfollow(ctx context.Context) error {
 }
 
 func (user *User) changeFriendship(ctx context.Context, endpoint, deviceID string) error {
-	q, err := signedBody(friendshipRequest{
+	return user.postFriendship(ctx, fmt.Sprintf(endpoint, user.ID), friendshipRequest{
 		sessionIDs:                 user.insta.sessionIDs(),
 		UserID:                     user.ID.String(),
 		RadioType:                  "ethernet-none",
@@ -298,15 +294,6 @@ func (user *User) changeFriendship(ctx context.Context, endpoint, deviceID strin
 		ContainerModule:            "profile",
 		DeviceID:                   deviceID,
 	})
-	if err != nil {
-		return err
-	}
-	var resp friendResp
-	if err := user.insta.callJSON(ctx, &reqOptions{Endpoint: fmt.Sprintf(endpoint, user.ID), Query: q, IsPost: true}, &resp); err != nil {
-		return err
-	}
-	user.Friendship = resp.Friendship
-	return nil
 }
 
 type friendshipShowQuery struct {
@@ -314,11 +301,7 @@ type friendshipShowQuery struct {
 }
 
 func (user *User) LoadFriendship(ctx context.Context) (*Friendship, error) {
-	q, err := formOf(friendshipShowQuery{IsExternalDeeplinkProfileView: "false"})
-	if err != nil {
-		return nil, err
-	}
-	err = user.insta.callJSON(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlFriendship, user.ID), Query: q}, &user.Friendship)
+	err := user.insta.callJSON(ctx, &reqOptions{Endpoint: fmt.Sprintf(urlFriendship, user.ID), Form: friendshipShowQuery{IsExternalDeeplinkProfileView: "false"}}, &user.Friendship)
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +324,7 @@ func (user *User) SuggestedUsers(ctx context.Context) ([]*User, error) {
 	var resp struct {
 		Users []*User `json:"users"`
 	}
-	q, err := formOf(chainingQuery{
+	err := user.insta.callJSON(ctx, &reqOptions{Endpoint: urlDiscoverChaining, Form: chainingQuery{
 		ConsumptionSurface:    "profile_hscroll",
 		EligibleForThreadsCTA: "false",
 		FromModule:            "feed_timeline",
@@ -350,11 +333,7 @@ func (user *User) SuggestedUsers(ctx context.Context) ([]*User, error) {
 		RequestEntryPoint:     "profile_auto_expand",
 		TargetID:              user.ID.String(),
 		TargetUsername:        user.Username,
-	})
-	if err != nil {
-		return nil, err
-	}
-	err = user.insta.callJSON(ctx, &reqOptions{Endpoint: urlDiscoverChaining, Query: q}, &resp)
+	}}, &resp)
 	if err != nil {
 		return nil, err
 	}

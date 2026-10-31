@@ -147,14 +147,14 @@ func (insta *Instagram) restoreHeader(k, v string) {
 
 // loggedOutRequest is the logged-out profile: www-claim 0, no x-fb-rmd, no
 // bandwidth sample yet.
-func (insta *Instagram) loggedOutRequest(endpoint, friendly, clientEndpoint string, query map[string]string) *reqOptions {
+func (insta *Instagram) loggedOutRequest(endpoint, friendly, clientEndpoint string, form any) *reqOptions {
 	return &reqOptions{
 		Endpoint:      endpoint,
 		IsPost:        true,
 		LoggedOut:     true,
 		Ignore429:     true, // surface the rate limit instead of sleeping 8 minutes
 		FriendlyName:  "IgApi: " + friendly,
-		Query:         query,
+		Form:          form,
 		IgnoreHeaders: []string{"X-Fb-Rmd"},
 		ExtraHeaders: map[string]string{
 			"X-Ig-Www-Claim":       "0",
@@ -173,12 +173,9 @@ type createKeystoreRequest struct {
 }
 
 func (insta *Instagram) createKeystore(ctx context.Context, keyHash string) (string, error) {
-	form, err := formOf(createKeystoreRequest{AppScopedDeviceID: insta.uuid, KeyHash: keyHash})
-	if err != nil {
-		return "", err
-	}
 	body, _, err := insta.sendRequest(ctx, insta.loggedOutRequest(createKeystoreURL,
-		"attestation/create_android_keystore/", clientEndpointUnknown, form))
+		"attestation/create_android_keystore/", clientEndpointUnknown,
+		createKeystoreRequest{AppScopedDeviceID: insta.uuid, KeyHash: keyHash}))
 	if err != nil {
 		return "", withBody(err, body)
 	}
@@ -284,10 +281,10 @@ type bloksTheme struct {
 }
 
 // bloksForm wraps params in the async_action form the app posts.
-func (insta *Instagram) bloksForm(params any) (map[string]string, error) {
+func (insta *Instagram) bloksForm(params any) (bloksAsyncForm, error) {
 	p, err := json.Marshal(params)
 	if err != nil {
-		return nil, err
+		return bloksAsyncForm{}, err
 	}
 	bk, err := json.Marshal(bloksClientContext{
 		BloksVersion: insta.sess.BloksVersionID,
@@ -295,9 +292,9 @@ func (insta *Instagram) bloksForm(params any) (map[string]string, error) {
 		ThemeParams:  []bloksTheme{{Value: []string{"three_neutral_gray"}, DesignSystemName: "XMDS"}},
 	})
 	if err != nil {
-		return nil, err
+		return bloksAsyncForm{}, err
 	}
-	return formOf(bloksAsyncForm{Params: string(p), ClientContext: string(bk), BloksVersioningID: insta.sess.BloksVersionID})
+	return bloksAsyncForm{Params: string(p), ClientContext: string(bk), BloksVersioningID: insta.sess.BloksVersionID}, nil
 }
 
 type attestationParams struct {

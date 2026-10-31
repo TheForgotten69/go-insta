@@ -3,17 +3,7 @@ package goinsta
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-)
-
-const (
-	docTranslationsUser             = "156105369516447605998684255875"
-	docUpsertTranslationsCreation   = "35466444201443961438414953916"
-	rootTranslationsUser            = "fetch__XDTUserDict"
-	rootUpsertTranslationsCreation  = "xig_upsert_user_translations_creation_settings"
-	friendlyTranslationsUser        = "TranslationsUserQuery"
-	friendlyUpsertTranslationsInput = "UpsertUserTranslationsCreationSettings"
 )
 
 // TranslationSettings are the account's translation preferences: what it reads
@@ -58,7 +48,8 @@ type translationsUserVars struct {
 
 // TranslationSettings reads the account's translation preferences.
 func (account *Account) TranslationSettings(ctx context.Context) (*TranslationSettings, error) {
-	body, err := account.insta.graphQL(ctx, gqlQuery{
+	var settings TranslationSettings
+	err := account.insta.graphQLRoot(ctx, gqlQuery{
 		friendly: friendlyTranslationsUser,
 		docID:    docTranslationsUser,
 		root:     rootTranslationsUser,
@@ -66,22 +57,11 @@ func (account *Account) TranslationSettings(ctx context.Context) (*TranslationSe
 		UsePreferredLanguageSetting: true,
 		ShouldFetchCreationSettings: true,
 		UserID:                      account.ID.String(),
-	})
+	}, &settings)
 	if err != nil {
 		return nil, err
 	}
-	var resp struct {
-		Data struct {
-			User *TranslationSettings `json:"fetch__XDTUserDict"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, err
-	}
-	if resp.Data.User == nil {
-		return nil, errors.New(rootTranslationsUser + ": no user in response")
-	}
-	return resp.Data.User, nil
+	return &settings, nil
 }
 
 // TranslationCreationUpdate changes the account's AI voice translation
@@ -115,7 +95,10 @@ type upsertTranslationsArgs struct {
 // SetTranslationSettings saves u, as the app's AI voice translation screen does.
 func (account *Account) SetTranslationSettings(ctx context.Context, u TranslationCreationUpdate) error {
 	id := generateUUID()
-	body, err := account.insta.graphQL(ctx, gqlQuery{
+	var ack struct {
+		ClientMutationID string `json:"client_mutation_id"`
+	}
+	err := account.insta.graphQLRoot(ctx, gqlQuery{
 		url:      graphQLWWWURL,
 		gzip:     true,
 		friendly: friendlyUpsertTranslationsInput,
@@ -131,19 +114,11 @@ func (account *Account) SetTranslationSettings(ctx context.Context, u Translatio
 			AcceptedConsent:  u.AcceptedConsent,
 			ApprovalFlow:     u.ApprovalFlow,
 		},
-	}})
+	}}, &ack)
 	if err != nil {
 		return err
 	}
-	var resp struct {
-		Data map[string]*struct {
-			ClientMutationID string `json:"client_mutation_id"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return err
-	}
-	if r := resp.Data[rootUpsertTranslationsCreation]; r == nil || r.ClientMutationID != id {
+	if ack.ClientMutationID != id {
 		return fmt.Errorf("%s: mutation not acknowledged", rootUpsertTranslationsCreation)
 	}
 	return nil

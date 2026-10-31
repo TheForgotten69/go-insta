@@ -149,10 +149,6 @@ func (tl *Timeline) fetch(ctx context.Context, reason string) ([]*Item, string, 
 		headers["X-Ig-Accept-Hint"] = "feed"
 	}
 	headers["X-Ig-Tail-Load-Request"] = tail
-	q, err := formOf(req)
-	if err != nil {
-		return nil, "", err
-	}
 
 	body, err := insta.call(ctx, &reqOptions{
 		Endpoint:     urlTimeline,
@@ -161,7 +157,7 @@ func (tl *Timeline) fetch(ctx context.Context, reason string) ([]*Item, string, 
 		Gzip:         true,
 		Stream:       true,
 		Priority:     "u=0",
-		Query:        q,
+		Form:         req,
 		ExtraHeaders: headers,
 	})
 	if err != nil {
@@ -221,17 +217,13 @@ func (insta *Instagram) StoryTray(ctx context.Context, reason TrayReason) (*Tray
 	if reason != TrayColdStart {
 		req.SupportedCapabilitiesNew = supportedCapabilities
 	}
-	q, err := formOf(req)
-	if err != nil {
-		return nil, err
-	}
 	tray := &Tray{}
-	err = insta.callJSON(ctx, &reqOptions{
+	err := insta.callJSON(ctx, &reqOptions{
 		Endpoint:     urlStories,
 		IsPost:       true,
 		Stream:       true,
 		Priority:     "u=0",
-		Query:        q,
+		Form:         req,
 		ExtraHeaders: map[string]string{"X-Ig-Tail-Load-Request": "false"},
 	}, tray)
 	if err != nil {

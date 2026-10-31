@@ -19,6 +19,23 @@ const (
 
 	docArchiveHighlight   = "355043344414417317058010037446"
 	docUnarchiveHighlight = "52990869615876622121615642083"
+
+	// client_doc_ids from assets/ig4a-instagram-schema_client_persist_ids.json; the
+	// "instagram" schema goes to graphql_www, "distillery" to graphql/query.
+	docPendingFollows       = "33138429313628334965326831157"
+	docApproveFollowRequest = "356404437015335956218183369113"
+	docIgnoreFollowRequest  = "1956506636707216159350023433"
+
+	docPostInsights      = "187673829817521675190278983686"
+	rootPostInsights     = "ig_post_insights"
+	friendlyPostInsights = "PostInsightsQuery"
+
+	docTranslationsUser             = "156105369516447605998684255875"
+	docUpsertTranslationsCreation   = "35466444201443961438414953916"
+	rootTranslationsUser            = "fetch__XDTUserDict"
+	rootUpsertTranslationsCreation  = "xig_upsert_user_translations_creation_settings"
+	friendlyTranslationsUser        = "TranslationsUserQuery"
+	friendlyUpsertTranslationsInput = "UpsertUserTranslationsCreationSettings"
 )
 
 type gqlQuery struct {
@@ -69,10 +86,6 @@ func (insta *Instagram) graphQL(ctx context.Context, gq gqlQuery, vars any) ([]b
 		headers["X-Graphql-Request-Purpose"] = gq.purpose
 		tagPurpose = gq.purpose
 	}
-	form, err := formOf(req)
-	if err != nil {
-		return nil, err
-	}
 	headers["X-Fb-Request-Analytics-Tags"] = `{"network_tags":{"product":"` + insta.sess.AppID +
 		`","request_category":"graphql","purpose":"` + tagPurpose + `","retry_attempt":"0"}}`
 	body, err := insta.call(ctx, &reqOptions{
@@ -84,7 +97,7 @@ func (insta *Instagram) graphQL(ctx context.Context, gq gqlQuery, vars any) ([]b
 			"X-Ig-Connection-Type", "X-Ig-Client-Endpoint", "X-Ig-Bloks-Serialize-Payload",
 			"X-Ig-Bandwidth-Speed-Kbps", "X-Ig-Bandwidth-Totalbytes-B", "X-Ig-Bandwidth-Totaltime-Ms"}, bloksHeaders...),
 		FriendlyName: gq.friendly,
-		Query:        form,
+		Form:         req,
 		ExtraHeaders: headers,
 	})
 	if err != nil {
@@ -166,7 +179,7 @@ func applyPatch(node any, path []any, data any) error {
 			if !ok {
 				// The skeleton may key a root field "1$<field>" while patches use "<field>".
 				for key, val := range n {
-					if strings.HasSuffix(key, "$"+k) {
+					if isRootKey(key, k) {
 						v = val
 						break
 					}
@@ -207,11 +220,40 @@ func deepMerge(dst, src map[string]any) {
 // rootField returns the canonical-named field "1$<name>(...)" from a GraphQL data object.
 func rootField(data map[string]json.RawMessage, name string) (json.RawMessage, bool) {
 	for k, v := range data {
-		if strings.HasPrefix(k, "1$"+name+"(") || k == name {
+		if isRootKey(k, name) {
 			return v, true
 		}
 	}
 	return nil, false
+}
+
+// isRootKey reports whether key names field name, as is or aliased
+// ("1$name" or "1$name(args)").
+func isRootKey(key, name string) bool {
+	if key == name {
+		return true
+	}
+	_, alias, ok := strings.Cut(key, "$")
+	return ok && (alias == name || strings.HasPrefix(alias, name+"("))
+}
+
+// graphQLRoot runs the query and decodes its root field (gq.root) into out.
+func (insta *Instagram) graphQLRoot(ctx context.Context, gq gqlQuery, vars, out any) error {
+	body, err := insta.graphQL(ctx, gq, vars)
+	if err != nil {
+		return err
+	}
+	var resp struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return err
+	}
+	raw, ok := rootField(resp.Data, gq.root)
+	if !ok || string(raw) == "null" {
+		return fmt.Errorf("%s: %w", gq.friendly, ErrEmptyResponse)
+	}
+	return json.Unmarshal(raw, out)
 }
 
 func (user *User) Posts() *Pager[*Item] {
@@ -224,18 +266,16 @@ func (user *User) Posts() *Pager[*Item] {
 			vars.MaxID, vars.ProfileGridItemsCursor, vars.PinnedProfileGridItemsIDs = &maxID, &cursor, &pinned
 			vars.RequestMediaChunk = false
 		}
-		body, err := user.insta.graphQL(ctx, gqlQuery{friendly: "IGProfileTimelineQuery", docID: docProfileTimeline,
-			root: "xdt_api__v1__profile_timeline", purpose: "fetch", gzip: true}, vars)
+		var tl profileTimeline
+		err := user.insta.graphQLRoot(ctx, gqlQuery{friendly: "IGProfileTimelineQuery", docID: docProfileTimeline,
+			root: "xdt_api__v1__profile_timeline", purpose: "fetch", gzip: true}, vars, &tl)
 		if gqlErr := (*GraphQLError)(nil); user.IsPrivate && errors.As(err, &gqlErr) {
 			err = fmt.Errorf("%w: %w", ErrPrivateAccount, err)
 		}
 		if err != nil {
 			return nil, "", err
 		}
-		page, err := parseProfilePosts(user.insta, body, pos)
-		if err != nil {
-			return nil, "", err
-		}
+		page := tl.page(user.insta, pos)
 		maxID, cursor = page.nextMaxID, page.gridCursor
 		pos += len(page.items)
 		return page.items, cursorIf(page.more, maxID), nil
@@ -306,31 +346,19 @@ type profilePage struct {
 	nextMaxID, gridCursor string
 }
 
-func parseProfilePosts(insta *Instagram, body []byte, pos int) (*profilePage, error) {
-	var resp struct {
-		Data map[string]json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, err
-	}
-	raw, ok := rootField(resp.Data, "xdt_api__v1__profile_timeline")
-	if !ok || string(raw) == "null" {
-		return nil, ErrEmptyResponse
-	}
-	var tl struct {
-		Grid []struct {
-			Media *struct {
-				*Item
-				TakenAt Int64 `json:"1ltaken_at"`
-			} `json:"media"`
-		} `json:"profile_grid_items"`
-		MoreAvailable bool    `json:"more_available"`
-		NextMaxID     *string `json:"next_max_id"`
-		GridCursor    *string `json:"profile_grid_items_cursor"`
-	}
-	if err := json.Unmarshal(raw, &tl); err != nil {
-		return nil, err
-	}
+type profileTimeline struct {
+	Grid []struct {
+		Media *struct {
+			*Item
+			TakenAt Int64 `json:"1ltaken_at"`
+		} `json:"media"`
+	} `json:"profile_grid_items"`
+	MoreAvailable bool    `json:"more_available"`
+	NextMaxID     *string `json:"next_max_id"`
+	GridCursor    *string `json:"profile_grid_items_cursor"`
+}
+
+func (tl *profileTimeline) page(insta *Instagram, pos int) *profilePage {
 	page := &profilePage{more: tl.MoreAvailable, items: make([]*Item, 0, len(tl.Grid))}
 	if tl.NextMaxID != nil {
 		page.nextMaxID = *tl.NextMaxID
@@ -354,5 +382,5 @@ func parseProfilePosts(insta *Instagram, body []byte, pos int) (*profilePage, er
 		it.Index = pos + len(page.items)
 		page.items = append(page.items, it)
 	}
-	return page, nil
+	return page
 }
