@@ -7,7 +7,7 @@ import (
 
 type userTagsQuery struct {
 	Count string `json:"count"`
-	MaxID string `json:"max_id,omitempty"`
+	maxIDQuery
 }
 
 // TaggedPosts pages the posts the user is tagged in.
@@ -22,19 +22,14 @@ func (user *User) TaggedPosts() *Pager[*Item] {
 		}
 		err := user.insta.callJSON(ctx, &reqOptions{
 			Endpoint:     fmt.Sprintf(urlUserTagsFeed, user.ID),
-			Form:         userTagsQuery{Count: "12", MaxID: nextID},
+			Form:         userTagsQuery{Count: "12", maxIDQuery: maxIDQuery{MaxID: nextID}},
 			ExtraHeaders: map[string]string{"X_IG_FETCH_AAT": "true"},
 		}, &resp)
 		if err != nil {
 			return nil, "", err
 		}
-		for _, it := range resp.Items {
-			setToItem(it, user.insta, "usertags_feed")
-			it.Index = pos
-			pos++
-		}
 		nextID = resp.NextMaxID
-		return resp.Items, cursorIf(resp.MoreAvailable, nextID), nil
+		return numberItems(resp.Items, user.insta, "usertags_feed", &pos), cursorIf(resp.MoreAvailable, nextID), nil
 	})
 }
 

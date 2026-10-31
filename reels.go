@@ -53,16 +53,15 @@ func (insta *Instagram) Reels() *Pager[*Item] {
 			if err := json.Unmarshal(line, &resp); err != nil {
 				return err
 			}
+			var fresh []*Item
 			for _, it := range resp.Items {
 				if it.Media == nil || seen[it.Media.ID] {
 					continue
 				}
 				seen[it.Media.ID] = true
-				setToItem(it.Media, insta, "clips_viewer_clips_tab")
-				it.Media.Index = pos
-				pos++
-				items = append(items, it.Media)
+				fresh = append(fresh, it.Media)
 			}
+			items = append(items, numberItems(fresh, insta, "clips_viewer_clips_tab", &pos)...)
 			return nil
 		})
 		if err != nil {

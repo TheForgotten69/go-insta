@@ -47,16 +47,11 @@ func (c *Collection) Posts() *Pager[*Item] {
 			return nil, "", err
 		}
 		nextID = resp.NextID
-		items := make([]*Item, 0, len(resp.Items))
-		for _, it := range resp.Items {
-			if it.Media != nil {
-				setToItem(it.Media, c.insta, "collection_feed")
-				it.Media.Index = pos
-				pos++
-				items = append(items, it.Media)
-			}
+		items := make([]*Item, len(resp.Items))
+		for i, it := range resp.Items {
+			items[i] = it.Media
 		}
-		return items, cursorIf(resp.MoreAvailable, nextID), nil
+		return numberItems(items, c.insta, "collection_feed", &pos), cursorIf(resp.MoreAvailable, nextID), nil
 	})
 }
 

@@ -55,7 +55,6 @@ func coordinate(lat, lng, v float64) string {
 	return s
 }
 
-// LocationInfo loads a location by id.
 func (insta *Instagram) LocationInfo(ctx context.Context, id int64) (*Location, error) {
 	var resp struct {
 		Location *Location `json:"location"`
@@ -127,18 +126,8 @@ func (insta *Instagram) LocationFeed(id int64, tab LocationTab) *Pager[*Item] {
 				items = append(items, m.Media)
 			}
 		}
-		out := items[:0]
-		for _, it := range items {
-			if it == nil {
-				continue
-			}
-			setToItem(it, insta, "location_feed")
-			it.Index = pos
-			pos++
-			out = append(out, it)
-		}
 		maxID, page, nextIDs = resp.NextMaxID, strconv.Itoa(resp.NextPage), javaList(resp.NextMediaIDs)
-		return out, cursorIf(resp.MoreAvailable, maxID), nil
+		return numberItems(items, insta, "location_feed", &pos), cursorIf(resp.MoreAvailable, maxID), nil
 	})
 }
 

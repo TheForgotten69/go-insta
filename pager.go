@@ -27,6 +27,22 @@ func newPager[T any](fetch func(ctx context.Context) ([]T, string, error)) *Page
 	return &Pager[T]{fetch: fetch}
 }
 
+// numberItems attaches the non-nil items to the session and numbers them from
+// *pos on, dropping nils in place.
+func numberItems(items []*Item, insta *Instagram, module string, pos *int) []*Item {
+	out := items[:0]
+	for _, it := range items {
+		if it == nil {
+			continue
+		}
+		setToItem(it, insta, module)
+		it.Index = *pos
+		*pos++
+		out = append(out, it)
+	}
+	return out
+}
+
 // cursorIf returns cursor when the server says more pages follow, else "".
 func cursorIf(more bool, cursor string) string {
 	if more {

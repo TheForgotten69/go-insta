@@ -59,32 +59,24 @@ type BlockedUser struct {
 	BlockedAt     Int64  `json:"block_at"`
 }
 
-type maxIDForm struct {
-	MaxID string `json:"max_id,omitempty"`
-}
-
-// maxBlockedPages bounds the blocked-list walk if the server keeps handing out cursors.
-const maxBlockedPages = 100
-
 // BlockedUsers returns every account the account has blocked.
 func (account *Account) BlockedUsers(ctx context.Context) ([]BlockedUser, error) {
-	var all []BlockedUser
-	cursor := ""
-	for range maxBlockedPages {
+	var cursor string
+	users, err := newPager(func(ctx context.Context) ([]BlockedUser, string, error) {
 		var page struct {
 			BlockedList []BlockedUser `json:"blocked_list"`
 			NextMaxID   string        `json:"next_max_id"`
 		}
-		if err := account.insta.callJSON(ctx, &reqOptions{Endpoint: urlBlockedList, Form: maxIDForm{MaxID: cursor}}, &page); err != nil {
-			return nil, err
-		}
-		all = append(all, page.BlockedList...)
-		if page.NextMaxID == "" || page.NextMaxID == cursor {
-			return all, nil
+		if err := account.insta.callJSON(ctx, &reqOptions{Endpoint: urlBlockedList, Form: maxIDQuery{MaxID: cursor}}, &page); err != nil {
+			return nil, "", err
 		}
 		cursor = page.NextMaxID
+		return page.BlockedList, cursor, nil
+	}).Collect(ctx, 0)
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("blocked list: still paging after %d pages", maxBlockedPages)
+	return users, nil
 }
 
 type setBestiesRequest struct {
@@ -191,10 +183,7 @@ func (account *Account) PendingFollowRequests(ctx context.Context) ([]*User, err
 	if err != nil {
 		return nil, err
 	}
-	for _, u := range users {
-		u.insta = account.insta
-	}
-	return users, nil
+	return account.insta.usersFrom(users, entryContext{}), nil
 }
 
 // decodeUserConnection reads either a plain user list or a connection with
