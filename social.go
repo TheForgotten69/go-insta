@@ -2,6 +2,7 @@ package goinsta
 
 import (
 	"context"
+	"strconv"
 	"strings"
 )
 
@@ -23,6 +24,14 @@ func (insta *Instagram) usersFrom(users []*User, entry entryContext) []*User {
 		u.entry = entry
 	}
 	return users
+}
+
+func idStrings(ids []int64) []string {
+	s := make([]string, len(ids))
+	for i, id := range ids {
+		s[i] = strconv.FormatInt(id, 10)
+	}
+	return s
 }
 
 type searchUsersQuery struct {
@@ -152,36 +161,35 @@ type followingVars struct {
 	MaxID                          string               `json:"max_id,omitempty"`
 }
 
-// followingRequestData: the app sends the nil-pointer fields as explicit nulls.
 type followingRequestData struct {
 	RankToken                string   `json:"rank_token"`
 	SupportedCapabilitiesNew []string `json:"supported_capabilities_new"`
 	IncludesHashtags         bool     `json:"includes_hashtags"`
 	SearchSurface            string   `json:"search_surface"`
-	Username                 *string  `json:"username"`
-	SupportNewAPI            *string  `json:"support_new_api"`
-	AbsoluteURLProcessed     *string  `json:"absolute_url_processed"`
-	PhoneID                  *string  `json:"phone_id"`
-	TargetID                 *string  `json:"target_id"`
-	PageSize                 *string  `json:"page_size"`
-	LoginAttemptCount        *string  `json:"login_attempt_count"`
-	Module                   *string  `json:"module"`
-	Limit                    *string  `json:"limit"`
-	IgSigKeyVersion          *string  `json:"ig_sig_key_version"`
-	First                    *string  `json:"first"`
-	DeviceID                 *string  `json:"device_id"`
-	Surface                  *string  `json:"surface"`
-	SearchClientType         *string  `json:"search_client_type"`
-	IgSig                    *string  `json:"ig_sig"`
-	CSRFMiddlewareToken      *string  `json:"csrfmiddlewaretoken"`
-	Query                    *string  `json:"query"`
-	AdID                     *string  `json:"adid"`
-	GUID                     *string  `json:"guid"`
-	RankMutual               *string  `json:"rank_mutual"`
-	Choice                   *string  `json:"choice"`
-	UUID                     *string  `json:"_uuid"`
-	UID                      *string  `json:"_uid"`
-	CSRFToken                *string  `json:"_csrftoken"`
+	Username                 jsonNull `json:"username"`
+	SupportNewAPI            jsonNull `json:"support_new_api"`
+	AbsoluteURLProcessed     jsonNull `json:"absolute_url_processed"`
+	PhoneID                  jsonNull `json:"phone_id"`
+	TargetID                 jsonNull `json:"target_id"`
+	PageSize                 jsonNull `json:"page_size"`
+	LoginAttemptCount        jsonNull `json:"login_attempt_count"`
+	Module                   jsonNull `json:"module"`
+	Limit                    jsonNull `json:"limit"`
+	IgSigKeyVersion          jsonNull `json:"ig_sig_key_version"`
+	First                    jsonNull `json:"first"`
+	DeviceID                 jsonNull `json:"device_id"`
+	Surface                  jsonNull `json:"surface"`
+	SearchClientType         jsonNull `json:"search_client_type"`
+	IgSig                    jsonNull `json:"ig_sig"`
+	CSRFMiddlewareToken      jsonNull `json:"csrfmiddlewaretoken"`
+	Query                    jsonNull `json:"query"`
+	AdID                     jsonNull `json:"adid"`
+	GUID                     jsonNull `json:"guid"`
+	RankMutual               jsonNull `json:"rank_mutual"`
+	Choice                   jsonNull `json:"choice"`
+	UUID                     jsonNull `json:"_uuid"`
+	UID                      jsonNull `json:"_uid"`
+	CSRFToken                jsonNull `json:"_csrftoken"`
 }
 
 func newFollowingVars(id Int64, maxID string) any {
@@ -237,14 +245,10 @@ type showManyRequest struct {
 
 // Friendships returns the friendship status for each user id (friendships/show_many).
 func (insta *Instagram) Friendships(ctx context.Context, ids ...int64) (map[string]Friendship, error) {
-	s := make([]string, len(ids))
-	for i, id := range ids {
-		s[i] = Int64(id).String()
-	}
 	var resp struct {
 		Statuses map[string]Friendship `json:"friendship_statuses"`
 	}
-	err := insta.callJSON(ctx, &reqOptions{Endpoint: urlFriendshipShowMany, IsPost: true, Form: showManyRequest{UUID: insta.uuid, IncludeFollowedBy: "true", UserIDs: strings.Join(s, ", ")}}, &resp)
+	err := insta.callJSON(ctx, &reqOptions{Endpoint: urlFriendshipShowMany, IsPost: true, Form: showManyRequest{UUID: insta.uuid, IncludeFollowedBy: "true", UserIDs: strings.Join(idStrings(ids), ", ")}}, &resp)
 	if err != nil {
 		return nil, err
 	}

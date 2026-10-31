@@ -258,9 +258,9 @@ func extractAAC(body []byte) (string, error) {
 }
 
 // bloksParams is the params document of a Bloks async action.
-type bloksParams[C, S any] struct {
-	Client C `json:"client_input_params"`
-	Server S `json:"server_params"`
+type bloksParams struct {
+	Client any `json:"client_input_params"`
+	Server any `json:"server_params"`
 }
 
 type bloksAsyncForm struct {
@@ -516,7 +516,7 @@ func (insta *Instagram) LoginTwoFactor(ctx context.Context, code string) (err er
 		return errors.New("empty two-factor code")
 	}
 	if _, err := insta.twoStepAction(ctx, methodPickerURL, clientEndpointMethodPicker,
-		bloksParams[methodPickerClient, methodPickerServer]{
+		bloksParams{
 			Client: methodPickerClient{SelectedMethod: "totp"},
 			Server: methodPickerServer{twoStepServerParams: insta.twoStepServer(tfa.context)},
 		},
@@ -524,7 +524,7 @@ func (insta *Instagram) LoginTwoFactor(ctx context.Context, code string) (err er
 		return fmt.Errorf("method_picker: %w", err)
 	}
 	body, err := insta.twoStepAction(ctx, verifyCodeURL, clientEndpointTOTP,
-		bloksParams[verifyCodeClient, verifyCodeServer]{
+		bloksParams{
 			Client: verifyCodeClient{
 				Code:           code,
 				DeviceID:       insta.dID,
@@ -627,8 +627,8 @@ func actionName(url string) string {
 
 // loginParams builds the send_login_request body. Many fields are static context
 // the app sends; the ones that matter are the credential, contact point and device.
-func (insta *Instagram) loginParams(username, encPassword string, flow *loginFlow) bloksParams[loginClientParams, loginServerParams] {
-	return bloksParams[loginClientParams, loginServerParams]{
+func (insta *Instagram) loginParams(username, encPassword string, flow *loginFlow) bloksParams {
+	return bloksParams{
 		Client: loginClientParams{
 			Password:                            encPassword,
 			ContactPoint:                        username,

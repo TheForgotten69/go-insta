@@ -303,7 +303,6 @@ func (reel *Reel) isHighlight() bool {
 	return strings.HasPrefix(reel.ReelID(), "highlight:")
 }
 
-// postHighlight sends a request that embeds highlightBase and decodes the reel it returns.
 func (insta *Instagram) postHighlight(ctx context.Context, endpoint string, req any) (*Reel, error) {
 	var resp struct {
 		Reel Reel `json:"reel"`

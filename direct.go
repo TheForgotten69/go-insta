@@ -13,6 +13,8 @@ import (
 // Thread is a direct-message conversation.
 type Thread struct {
 	insta *Instagram
+	// loaded is set when Items is a full page from the thread endpoint, not an inbox preview.
+	loaded bool
 
 	ThreadID       string        `json:"thread_id"`
 	ThreadV2ID     string        `json:"thread_v2_id"`
@@ -76,9 +78,7 @@ func (d *DirectItem) UnmarshalJSON(b []byte) error {
 
 func (t *Thread) setValues(insta *Instagram) {
 	t.insta = insta
-	for _, u := range t.Users {
-		u.insta = insta
-	}
+	insta.usersFrom(t.Users, entryContext{})
 	for _, it := range t.Items {
 		if it.MediaShare != nil {
 			setToItem(it.MediaShare, insta, "direct_thread")
@@ -195,13 +195,20 @@ func (insta *Instagram) fetchThread(ctx context.Context, threadID, cursor string
 		return nil, fmt.Errorf("thread %s: %w", threadID, ErrEmptyResponse)
 	}
 	resp.Thread.setValues(insta)
+	resp.Thread.loaded = true
 	return resp.Thread, nil
 }
 
-// Messages pages backwards through the thread's messages, newest first.
+// Messages pages backwards through the thread's messages, newest first. A thread
+// from Thread already holds the first page, so the walk starts after it.
 func (t *Thread) Messages() *Pager[*DirectItem] {
-	cursor := ""
+	cursor, first := "", t.loaded
 	return newPager(func(ctx context.Context) ([]*DirectItem, string, error) {
+		if first {
+			first = false
+			cursor = t.OldestCursor
+			return t.Items, cursorIf(t.HasOlder, cursor), nil
+		}
 		page, err := t.insta.fetchThread(ctx, t.ThreadID, cursor)
 		if err != nil {
 			return nil, "", err
@@ -211,19 +218,29 @@ func (t *Thread) Messages() *Pager[*DirectItem] {
 	})
 }
 
-// sendTextForm is broadcast/text's plain form. client_context, mutation_token
-// and offline_threading_id carry the same offline threading id.
-type sendTextForm struct {
+// directMutation is the part every direct write shares; client_context and
+// offline_threading_id carry the same offline threading id.
+type directMutation struct {
 	UUID               string `json:"_uuid"`
 	Action             string `json:"action"`
-	Text               string `json:"text"`
 	ClientContext      string `json:"client_context"`
 	OfflineThreadingID string `json:"offline_threading_id"`
-	MutationToken      string `json:"mutation_token"`
-	DeviceID           string `json:"device_id"`
-	SendAttribution    string `json:"send_attribution"`
-	ThreadIDs          string `json:"thread_ids,omitempty"`
-	RecipientUsers     string `json:"recipient_users,omitempty"`
+}
+
+func (insta *Instagram) directMutation(action string) directMutation {
+	otid := offlineThreadingID()
+	return directMutation{UUID: insta.uuid, Action: action, ClientContext: otid, OfflineThreadingID: otid}
+}
+
+// sendTextForm is broadcast/text's plain form; mutation_token repeats the offline threading id.
+type sendTextForm struct {
+	directMutation
+	Text            string `json:"text"`
+	MutationToken   string `json:"mutation_token"`
+	DeviceID        string `json:"device_id"`
+	SendAttribution string `json:"send_attribution"`
+	ThreadIDs       string `json:"thread_ids,omitempty"`
+	RecipientUsers  string `json:"recipient_users,omitempty"`
 }
 
 // DirectSent is the server's acknowledgement of a sent message.
@@ -242,29 +259,22 @@ func (t *Thread) SendText(ctx context.Context, text string) (*DirectSent, error)
 // SendDirectText sends a text message to these users, in their existing
 // thread or a new one.
 func (insta *Instagram) SendDirectText(ctx context.Context, text string, userIDs ...int64) (*DirectSent, error) {
-	ids := make([]string, len(userIDs))
-	for i, id := range userIDs {
-		ids[i] = strconv.FormatInt(id, 10)
-	}
-	return insta.sendText(ctx, text, "", "[["+strings.Join(ids, ",")+"]]")
+	return insta.sendText(ctx, text, "", "[["+strings.Join(idStrings(userIDs), ",")+"]]")
 }
 
 func (insta *Instagram) sendText(ctx context.Context, text, threadIDs, recipients string) (*DirectSent, error) {
-	otid := offlineThreadingID()
+	m := insta.directMutation("send_item")
 	var resp struct {
 		Payload DirectSent `json:"payload"`
 	}
 	if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlDirectSendText, IsPost: true, Form: sendTextForm{
-		UUID:               insta.uuid,
-		Action:             "send_item",
-		Text:               text,
-		ClientContext:      otid,
-		OfflineThreadingID: otid,
-		MutationToken:      otid,
-		DeviceID:           insta.dID,
-		SendAttribution:    "direct_thread",
-		ThreadIDs:          threadIDs,
-		RecipientUsers:     recipients,
+		directMutation:  m,
+		Text:            text,
+		MutationToken:   m.OfflineThreadingID,
+		DeviceID:        insta.dID,
+		SendAttribution: "direct_thread",
+		ThreadIDs:       threadIDs,
+		RecipientUsers:  recipients,
 	}}, &resp); err != nil {
 		return nil, err
 	}
@@ -272,26 +282,16 @@ func (insta *Instagram) sendText(ctx context.Context, text, threadIDs, recipient
 }
 
 type itemSeenForm struct {
-	UUID               string `json:"_uuid"`
-	Action             string `json:"action"`
-	ThreadID           string `json:"thread_id"`
-	ClientContext      string `json:"client_context"`
-	OfflineThreadingID string `json:"offline_threading_id"`
+	directMutation
+	ThreadID string `json:"thread_id"`
 }
 
 // MarkSeen marks the thread read up to item.
 func (t *Thread) MarkSeen(ctx context.Context, item *DirectItem) error {
-	otid := offlineThreadingID()
 	_, err := t.insta.call(ctx, &reqOptions{
 		Endpoint: fmt.Sprintf(urlDirectItemSeen, t.ThreadID, item.ItemID),
 		IsPost:   true,
-		Form: itemSeenForm{
-			UUID:               t.insta.uuid,
-			Action:             "mark_seen",
-			ThreadID:           t.ThreadID,
-			ClientContext:      otid,
-			OfflineThreadingID: otid,
-		},
+		Form:     itemSeenForm{directMutation: t.insta.directMutation("mark_seen"), ThreadID: t.ThreadID},
 	})
 	return err
 }
