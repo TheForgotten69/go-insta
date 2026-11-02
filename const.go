@@ -157,6 +157,7 @@ var (
 	ErrInvalidVideo       = errors.New("invalid video, please use an mp4 with a video track")
 	ErrNoHighlightItems   = errors.New("a highlight needs at least one story item")
 	ErrNotHighlight       = errors.New("reel is not a highlight")
+	ErrCoverCrop          = errors.New("a cover crop is [left, top, right, bottom] fractions of the frame, left < right and top < bottom")
 	ErrCarouselMediaLimit = errors.New("an album takes 2 to 20 photos")
 
 	ErrPrivateAccount = errors.New("account is private and not followed")

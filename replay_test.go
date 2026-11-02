@@ -616,7 +616,7 @@ func TestCreateAndEditHighlight(t *testing.T) {
 	insta, r := newReplay(t, "highlight_create", "highlight_edit")
 	cover := testItem(insta, "4019477520007509117_42865264907")
 	cover.OriginalWidth, cover.OriginalHeight = 1080, 1920
-	hl, err := insta.CreateHighlight(t.Context(), "a", cover)
+	hl, err := insta.CreateHighlight(t.Context(), "a", HighlightOptions{}, cover)
 	if err != nil {
 		t.Fatal(err)
 	}

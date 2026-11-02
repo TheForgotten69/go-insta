@@ -61,7 +61,7 @@ func TestLiveStoryLinkPost(t *testing.T) {
 	}
 
 	pause()
-	hl, err := insta.CreateHighlight(ctx, "go-insta link", story)
+	hl, err := insta.CreateHighlight(ctx, "go-insta link", HighlightOptions{}, story)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,5 +69,43 @@ func TestLiveStoryLinkPost(t *testing.T) {
 	t.Logf("highlight %s cover=%s items=%d", hl.ReelID(), hl.CoverMedia.MediaID, len(hl.Items))
 	for _, it := range hl.Items {
 		t.Logf("highlight item %s: story_feed_media=%v", it.ID, it.StoryFeedMedia)
+	}
+}
+
+// Run: go test -tags live -run TestLiveHighlightCoverCrop -v .
+// Creates a highlight framed on the top square of its story, reframes it on the
+// bottom square, reads each crop back, then deletes the highlight and the story.
+func TestLiveHighlightCoverCrop(t *testing.T) {
+	insta, err := ImportSession("login.session.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer insta.ExportSession("login.session.json")
+	ctx := t.Context()
+
+	story, err := insta.UploadStory(ctx, testJPEG(t, 1080, 1920), StoryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { t.Logf("delete story: %v", story.Delete(ctx)) }()
+	time.Sleep(2 * time.Second)
+
+	top := []float64{0, 0, 1, 0.5625}
+	hl, err := insta.CreateHighlight(ctx, "go-insta crop", HighlightOptions{CoverCrop: top}, story)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { t.Logf("delete highlight: %v", hl.Delete(ctx)) }()
+	if formatCrop(hl.CoverMedia.CropRect) != formatCrop(top) {
+		t.Errorf("created cover crop = %v, want %v", hl.CoverMedia.CropRect, top)
+	}
+
+	time.Sleep(2 * time.Second)
+	bottom := []float64{0, 0.4375, 1, 1}
+	if err := hl.Edit(ctx, HighlightEdit{Cover: story, CoverCrop: bottom}); err != nil {
+		t.Fatal(err)
+	}
+	if formatCrop(hl.CoverMedia.CropRect) != formatCrop(bottom) {
+		t.Errorf("edited cover crop = %v, want %v", hl.CoverMedia.CropRect, bottom)
 	}
 }

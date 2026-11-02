@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The project uses
 
 ## [Unreleased]
 
+### Breaking
+
+- `CreateHighlight` takes a `HighlightOptions` argument; pass `HighlightOptions{}` for the old behavior.
+
+### Features
+
+- `HighlightOptions.CoverCrop` and `HighlightEdit.CoverCrop` choose the part of the cover the
+  tray shows (`[left, top, right, bottom]` fractions of the frame) instead of its centred
+  square, for a cover whose title is not in the middle. A crop that is not a rectangle inside
+  the frame returns `ErrCoverCrop` before any request.
+
 ## [0.7.2] - 2026-11-01
 
 ### Features

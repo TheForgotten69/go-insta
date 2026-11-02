@@ -846,7 +846,7 @@ func writeHighlight(r *runner, insta *goinsta.Instagram, keep bool) {
 	if len(stories) == 2 {
 		r.step("CreateHighlight", func() (string, error) {
 			var err error
-			hl, err = insta.CreateHighlight(ctx, "go-insta smoke", stories[0])
+			hl, err = insta.CreateHighlight(ctx, "go-insta smoke", goinsta.HighlightOptions{}, stories[0])
 			if err != nil {
 				return "", err
 			}

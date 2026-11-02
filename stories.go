@@ -186,16 +186,27 @@ type editHighlightRequest struct {
 	RemovedMediaIDs string `json:"removed_media_ids"`
 }
 
+// HighlightOptions are the choices of the create screen. CoverCrop is the part of
+// the cover the tray shows, as [left, top, right, bottom] fractions of the frame;
+// nil is its centred square.
+type HighlightOptions struct {
+	CoverCrop []float64
+}
+
 // CreateHighlight makes a highlight from story items; the first is the cover.
 // Instagram silently cuts the title to 16 characters; the returned Title shows it.
-func (insta *Instagram) CreateHighlight(ctx context.Context, title string, items ...*Item) (*Reel, error) {
+func (insta *Instagram) CreateHighlight(ctx context.Context, title string, opts HighlightOptions, items ...*Item) (*Reel, error) {
 	if len(items) == 0 {
 		return nil, ErrNoHighlightItems
+	}
+	crop, err := coverCrop(items[0], opts.CoverCrop)
+	if err != nil {
+		return nil, err
 	}
 	return insta.postHighlight(ctx, urlHighlightCreate, createHighlightRequest{
 		highlightBase:       insta.highlightBase("STORY_VIEWER_PROFILE"),
 		Title:               title,
-		Cover:               coverJSON(items[0].ID, formatCrop(centredSquare(items[0]))),
+		Cover:               coverJSON(items[0].ID, crop),
 		MediaIDs:            mediaIDList(items),
 		CreationID:          newUploadID(),
 		ShouldAddToMainGrid: "false",
@@ -216,10 +227,12 @@ func (reel *Reel) AddItems(ctx context.Context, items ...*Item) error {
 }
 
 // HighlightEdit is one save of the profile's "Edit highlight" screen. An empty
-// Title or a nil Cover keeps the current one.
+// Title or a nil Cover keeps the current one; CoverCrop frames Cover, like
+// HighlightOptions.CoverCrop.
 type HighlightEdit struct {
 	Title       string
 	Cover       *Item
+	CoverCrop   []float64
 	Add, Remove []*Item
 }
 
@@ -233,7 +246,11 @@ func (reel *Reel) Edit(ctx context.Context, e HighlightEdit) error {
 	}
 	media, crop := reel.CoverMedia.MediaID, formatCrop(reel.CoverMedia.CropRect)
 	if e.Cover != nil {
-		media, crop = e.Cover.ID, formatCrop(centredSquare(e.Cover))
+		var err error
+		if crop, err = coverCrop(e.Cover, e.CoverCrop); err != nil {
+			return err
+		}
+		media = e.Cover.ID
 	}
 	if media != "" {
 		req.Cover = coverJSON(media, crop)
@@ -331,6 +348,17 @@ func coverJSON(mediaID, crop string) string {
 		CropRect string `json:"crop_rect"`
 	}{mediaID, crop})
 	return string(b)
+}
+
+// coverCrop is the formatted crop of cover: r, or its centred square when r is nil.
+func coverCrop(cover *Item, r []float64) (string, error) {
+	if r == nil {
+		return formatCrop(centredSquare(cover)), nil
+	}
+	if len(r) != 4 || r[0] < 0 || r[1] < 0 || r[2] > 1 || r[3] > 1 || r[0] >= r[2] || r[1] >= r[3] {
+		return "", fmt.Errorf("%w: %v", ErrCoverCrop, r)
+	}
+	return formatCrop(r), nil
 }
 
 // centredSquare is the item's centred square as [left,top,right,bottom] fractions.
