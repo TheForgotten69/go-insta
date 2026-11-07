@@ -25,6 +25,7 @@ type Item struct {
 	TakenAt           Int64  `json:"taken_at"`
 	Pk                Int64  `json:"pk"`
 	ID                string `json:"id"`
+	FBID              Int64  `json:"fbid"`
 	Index             int    // position in feed
 	CommentsDisabled  bool   `json:"comments_disabled"`
 	DeviceTimestamp   Int64  `json:"device_timestamp"`

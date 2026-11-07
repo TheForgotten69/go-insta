@@ -34,9 +34,11 @@ The `just` recipes below live in `~/Documents/projects/research/instagram/justfi
    captured edits only pick a story frame. **[you]** Instagram cuts titles to 16 characters
    without an error.
 
-3. **Analytics**: account dashboard, Reel insights, insights grid, story viewers, comment
-   summary opt-in and subscription insights are typed and verified live on the test account
-   (Creator since 2026-10-31). Unverified: series and fan club insights (raw JSON; the account
+3. **Analytics**: account dashboard, Reel insights, insights grid, story viewers, story
+   insights, comment summary opt-in and subscription insights are typed and verified live on
+   the test account (Creator since 2026-10-31). Story insights (2026-11-08): a 5-viewer story
+   showed Navigation 5 and Exited 5; stories with 1-3 viewers show no navigation. Forward,
+   Back and Next story were never non-zero, so their rows are read by label but not yet seen. Unverified: series and fan club insights (raw JSON; the account
    has neither), `AcceptInsightsTerms` (cannot be undone), the story insights opt-in and
    reset, premium insights (needs Meta Verified). Kept as raw JSON because they came back
    empty or null: gender, top languages, net followers, follower growth, tips, top active

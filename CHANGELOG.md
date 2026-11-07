@@ -15,6 +15,10 @@ All notable changes to this project are documented here. The project uses
   tray shows (`[left, top, right, bottom]` fractions of the frame) instead of its centred
   square, for a cover whose title is not in the middle. A crop that is not a rectangle inside
   the frame returns `ErrCoverCrop` before any request.
+- `Item.StoryInsights` reads a story's insights screen: navigation (total, forward, back,
+  next story, exited) as counts, and every row of the overview, views, interactions and
+  profile activity sections as displayed. Verified live; navigation shows once a story has
+  about 5 viewers. `Item.FBID` holds the media's Facebook id.
 
 ## [0.7.2] - 2026-11-01
 

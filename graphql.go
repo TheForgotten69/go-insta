@@ -37,6 +37,10 @@ const (
 	friendlyTranslationsUser        = "TranslationsUserQuery"
 	friendlyUpsertTranslationsInput = "UpsertUserTranslationsCreationSettings"
 
+	docBloksComponentQuery  = "4185925942781376672504462558" // BloksAsyncComponentQuery
+	rootBloksComponentQuery = "bloks_component_query"
+	friendlyBloksAppRoot    = "IGBloksAppRootQuery-" // + the Bloks app id
+
 	docLongformInsights      = "142319532318085841412086369996"
 	friendlyLongformInsights = "LongformInsightsQuery"
 

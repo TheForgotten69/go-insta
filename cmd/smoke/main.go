@@ -242,6 +242,18 @@ func readAnalytics(r *runner, insta *goinsta.Instagram) {
 		on, err := acc.CommentInsightsOptIn(ctx)
 		return fmt.Sprintf("opted in=%v", on), err
 	})
+	r.step("item.StoryInsights (newest own story)", func() (string, error) {
+		reel, err := acc.Stories(ctx)
+		if err != nil || len(reel.Items) == 0 {
+			return "no live story", err
+		}
+		in, err := reel.Items[0].StoryInsights(ctx)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d interaction rows, navigation shown=%v",
+			len(in.Rows[goinsta.StoryUnitInteractions]), in.Navigation != nil), nil
+	})
 	r.step("account.SubscriptionInsights", func() (string, error) {
 		s, err := acc.SubscriptionInsights(ctx)
 		if err != nil {
