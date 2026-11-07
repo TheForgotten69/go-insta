@@ -275,11 +275,6 @@ type bloksClientContext struct {
 	ThemeParams  []bloksTheme `json:"theme_params"`
 }
 
-type bloksTheme struct {
-	Value            []string `json:"value"`
-	DesignSystemName string   `json:"design_system_name"`
-}
-
 // bloksForm wraps params in the async_action form the app posts.
 func (insta *Instagram) bloksForm(params any) (bloksAsyncForm, error) {
 	p, err := json.Marshal(params)
@@ -289,7 +284,7 @@ func (insta *Instagram) bloksForm(params any) (bloksAsyncForm, error) {
 	bk, err := json.Marshal(bloksClientContext{
 		BloksVersion: insta.sess.BloksVersionID,
 		StylesID:     "instagram",
-		ThemeParams:  []bloksTheme{{Value: []string{"three_neutral_gray"}, DesignSystemName: "XMDS"}},
+		ThemeParams:  xmdsTheme,
 	})
 	if err != nil {
 		return bloksAsyncForm{}, err

@@ -161,13 +161,17 @@ func requestBody(req *http.Request) ([]byte, error) {
 func capture(t *testing.T, insta *Instagram, respond func(sent) (int, string)) *[]sent {
 	t.Helper()
 	var all []sent
+	var mu sync.Mutex
 	insta.SetHTTPClient(&http.Client{Transport: handlerFunc(func(req *http.Request) (int, string) {
 		raw, err := requestBody(req)
 		if err != nil {
-			t.Fatal(err)
+			t.Error(err)
+			return 500, ""
 		}
 		s := newSent(req, raw)
+		mu.Lock()
 		all = append(all, s)
+		mu.Unlock()
 		return respond(s)
 	})})
 	return &all

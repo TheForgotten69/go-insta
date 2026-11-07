@@ -33,14 +33,7 @@ func TestLiveStoryInsights(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	show := func(p *int) any {
-		if p == nil {
-			return nil
-		}
-		return *p
-	}
-	t.Logf("story %s fbid=%d navigation=%v forward=%v back=%v next=%v exited=%v",
-		story.ID, story.FBID, show(in.Navigation), show(in.Forward), show(in.Back), show(in.NextStory), show(in.Exited))
+	t.Logf("story %s fbid=%d", story.ID, story.FBID)
 	for unit, rows := range in.Rows {
 		t.Logf("  %s: %v", unit, rows)
 	}

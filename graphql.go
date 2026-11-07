@@ -91,7 +91,7 @@ type gqlQuery struct {
 	root     string
 	purpose  string // "fetch", "refresh" or "prefetch"; "" omits it, as list and search queries do
 	gzip     bool   // per query in the captures, not per endpoint
-	priority string // "u=3, i" when empty; Bloks queries send "u=1"
+	priority string // "u=3, i" when empty
 }
 
 type graphQLForm struct {

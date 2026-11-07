@@ -2,8 +2,10 @@ package goinsta
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -36,14 +38,16 @@ func TestStoryInsights(t *testing.T) {
 	if len(reqs) != 1+len(storyInsightsUnits) || reqs[0].req.URL.Path != "/api/v1/media/4017339574726819587_42865264907/info/" {
 		t.Fatalf("%d requests, first %s", len(reqs), reqs[0].req.URL.Path)
 	}
-	for i, unit := range storyInsightsUnits {
-		r := reqs[i+1]
+	units := map[string]bool{}
+	for _, r := range reqs[1:] {
 		v := r.vars()
 		params, _ := v["params"].(map[string]any)
+		unit := strings.TrimPrefix(fmt.Sprint(params["app_id"]), storyInsightsApp)
+		units[unit] = true
 		bk, _ := v["bk_context"].(map[string]any)
 		if r.req.URL.Path != "/graphql_www" || r.payload["client_doc_id"] != docBloksComponentQuery ||
 			r.req.Header.Get("X-Root-Field-Name") != rootBloksComponentQuery || r.req.Header.Get("Priority") != "u=1" ||
-			params["app_id"] != storyInsightsApp+unit ||
+			!slices.Contains(storyInsightsUnits, unit) ||
 			params["bloks_versioning_id"] != bloksVerID || bk["android_os_api_level"] != 33.0 {
 			t.Errorf("%s request: %s %v %v", unit, r.req.URL.Path, r.payload["client_doc_id"], v)
 		}
@@ -52,6 +56,9 @@ func TestStoryInsights(t *testing.T) {
 		}
 	}
 
+	if len(units) != len(storyInsightsUnits) {
+		t.Errorf("units requested: %v", units)
+	}
 	if in.Navigation == nil || *in.Navigation != 5 || in.Exited == nil || *in.Exited != 5 ||
 		in.Forward != nil || in.Back != nil || in.NextStory != nil {
 		t.Errorf("navigation = %v forward=%v back=%v next=%v exited=%v", in.Navigation, in.Forward, in.Back, in.NextStory, in.Exited)
