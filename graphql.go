@@ -91,6 +91,7 @@ type gqlQuery struct {
 	root     string
 	purpose  string // "fetch", "refresh" or "prefetch"; "" omits it, as list and search queries do
 	gzip     bool   // per query in the captures, not per endpoint
+	priority string // "u=3, i" when empty; Bloks queries send "u=1"
 }
 
 type graphQLForm struct {
@@ -138,7 +139,7 @@ func (insta *Instagram) graphQL(ctx context.Context, gq gqlQuery, vars any) ([]b
 		Endpoint: url,
 		IsPost:   true,
 		Gzip:     gq.gzip,
-		Priority: "u=3, i",
+		Priority: cmp.Or(gq.priority, "u=3, i"),
 		IgnoreHeaders: append([]string{"X-Ig-Www-Claim", "X-Ig-Family-Device-Id", "X-Fb-Connection-Type",
 			"X-Ig-Connection-Type", "X-Ig-Client-Endpoint", "X-Ig-Bloks-Serialize-Payload",
 			"X-Ig-Bandwidth-Speed-Kbps", "X-Ig-Bandwidth-Totalbytes-B", "X-Ig-Bandwidth-Totaltime-Ms"}, bloksHeaders...),

@@ -42,7 +42,8 @@ func TestStoryInsights(t *testing.T) {
 		params, _ := v["params"].(map[string]any)
 		bk, _ := v["bk_context"].(map[string]any)
 		if r.req.URL.Path != "/graphql_www" || r.payload["client_doc_id"] != docBloksComponentQuery ||
-			r.req.Header.Get("X-Root-Field-Name") != rootBloksComponentQuery || params["app_id"] != storyInsightsApp+unit ||
+			r.req.Header.Get("X-Root-Field-Name") != rootBloksComponentQuery || r.req.Header.Get("Priority") != "u=1" ||
+			params["app_id"] != storyInsightsApp+unit ||
 			params["bloks_versioning_id"] != bloksVerID || bk["android_os_api_level"] != 33.0 {
 			t.Errorf("%s request: %s %v %v", unit, r.req.URL.Path, r.payload["client_doc_id"], v)
 		}

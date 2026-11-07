@@ -114,12 +114,14 @@ live response.
 - GraphQL: gzip is per query, the null-validation header per endpoint
   (`graphql/query` takes the eager-dict one), roots can be aliased `1$field(args)`.
 - DMs: the app sends and marks seen over MQTT; the REST endpoints are legacy.
-- Bloks apps (`0gB7.A03(appId, map)`, builder in `X.09Ni`, classes4): a `com.instagram.*` app is
-  `POST bloks/apps/<app>/` with each map entry as its own form field beside
-  `bloks_versioning_id` and `bk_client_context`; a `com.bloks.www.*` app is GraphQL
-  `IGBloksAppRootQuery-<app>` with `variables.params.params` = the map as JSON (doc
-  `IGBloksAppRootQuery` for screens, `BloksAsyncComponentQuery` for components, whose map
-  is `{"params":{…}}`). Sending an app down the wrong route answers 400 or `field_exception`.
+- Bloks apps (`0gB7.A03(appId, map)`, builder in `X.09Ni`, classes4): a per-app gate
+  (`09Ni.A0A`) picks GraphQL `IGBloksAppRootQuery-<app>`, with `variables.params.params` =
+  the map as JSON (doc `IGBloksAppRootQuery` for screens, `BloksAsyncComponentQuery` for
+  components, whose map is `{"params":{…}}`; priority `u=1`). Ungated apps go to REST:
+  `bloks/async_action/<app>/` for `com.bloks.www.*`, else `bloks/apps/<app>/`, each map entry
+  its own form field beside `bloks_versioning_id` and `bk_client_context`. Seen live: the
+  map packed into one `params` field answers 400 with an empty message; a `com.instagram.*`
+  app sent as `IGBloksAppRootQuery` answers `field_exception`.
 - A screen often only lays out its sections; each one loads as an async component named in
   the screen's `app_id_expr`/`params`. The story insights screen does this.
 - The Waydroid emulator (NVIDIA venus mode) cannot encode video, so Reels cannot be

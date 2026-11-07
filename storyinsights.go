@@ -21,8 +21,8 @@ const (
 var storyInsightsUnits = []string{StoryUnitOverview, StoryUnitViews, StoryUnitInteractions, StoryUnitProfileActivity}
 
 // StoryInsights are a story's metrics as its insights screen shows them. A nil
-// count is a row the screen leaves out: no taps of that kind, or a story seen
-// by too few accounts (navigation showed with 5 viewers, not with 3).
+// count is a row the screen leaves out: no taps of that kind, or no data yet
+// (the app's screen showed its empty state at 1-3 views, data at 5 viewers).
 type StoryInsights struct {
 	Navigation *int // Forward + Back + NextStory + Exited
 	Forward    *int
@@ -41,7 +41,9 @@ type storyUnitParams struct {
 }
 
 // StoryInsights loads one of the account's own stories' insights screen. The
-// typed counts read the English labels of the default en_US locale.
+// typed counts read the English labels of the default en_US locale. Live, only
+// Navigation and Exited have shown as rows; the Forward, Back and Next story
+// labels come from the screen's info sheet.
 func (item *Item) StoryInsights(ctx context.Context) (*StoryInsights, error) {
 	fbid := item.FBID
 	if fbid == 0 {
@@ -136,6 +138,7 @@ func (insta *Instagram) bloksComponent(ctx context.Context, appID string, params
 		root:     rootBloksComponentQuery,
 		purpose:  "fetch",
 		gzip:     true,
+		priority: "u=1",
 	}, bloksComponentVars{
 		Params: bloksAppParams{
 			Params:            string(p),

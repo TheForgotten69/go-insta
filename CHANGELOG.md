@@ -17,8 +17,8 @@ All notable changes to this project are documented here. The project uses
   the frame returns `ErrCoverCrop` before any request.
 - `Item.StoryInsights` reads a story's insights screen: navigation (total, forward, back,
   next story, exited) as counts, and every row of the overview, views, interactions and
-  profile activity sections as displayed. Verified live; navigation shows once a story has
-  about 5 viewers. `Item.FBID` holds the media's Facebook id.
+  profile activity sections as displayed. Verified live on a story with 5 viewers (the app
+  showed no data for stories with 1-3 views). `Item.FBID` holds the media's Facebook id.
 
 ## [0.7.2] - 2026-11-01
 
