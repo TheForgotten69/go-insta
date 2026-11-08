@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The project uses
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-08
+
 ### Breaking
 
 - `CreateHighlight` takes a `HighlightOptions` argument; pass `HighlightOptions{}` for the old behavior.
@@ -260,6 +262,7 @@ First release: an Instagram for Android 453 private API client.
 - Stories, highlights, likes, comments, saves, follows, photo, album and story uploads.
 - `cmd/httplog` for device captures and `cmd/smoke` for live checks.
 
+[0.8.0]: https://github.com/TheForgotten69/go-insta/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/TheForgotten69/go-insta/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/TheForgotten69/go-insta/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/TheForgotten69/go-insta/compare/v0.6.0...v0.7.0
