@@ -128,6 +128,11 @@ const (
 	urlLocationInfo     = "locations/%d/info/"
 	urlLocationSections = "locations/%d/sections/"
 
+	urlMusicTopTrends      = "music/top_trends/"
+	urlMusicTrending       = "music/trending/"
+	urlMusicStoriesBrowser = "music/stories_audio_browser/"
+	urlMusicClipsBrowser   = "music/clips_audio_browser/"
+
 	urlDirectInbox        = "direct_v2/inbox/"
 	urlDirectPendingInbox = "direct_v2/pending_inbox/"
 	urlDirectThread       = "direct_v2/threads/%s/"

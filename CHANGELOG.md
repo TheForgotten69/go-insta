@@ -19,6 +19,11 @@ All notable changes to this project are documented here. The project uses
   next story, exited) as counts, and every row of the overview, views, interactions and
   profile activity sections as displayed. Verified live on a story with 5 viewers (the app
   showed no data for stories with 1-3 views). `Item.FBID` holds the media's Facebook id.
+- Music (verified live): `TrendingAudio` pages through the app's trending audio list with
+  each audio's rank, previous rank, Reels count and trending arrow (the Reels picker's
+  Trending tab ranks the same audio); `StoryTrendingMusic` pages through the story music
+  sticker's popular tracks; `MusicBrowser` loads the story or Reels music picker's
+  playlists (For you, Featured, New releases, Original audio).
 
 ## [0.7.2] - 2026-11-01
 

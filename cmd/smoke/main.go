@@ -441,6 +441,34 @@ func readFeeds(r *runner, insta *goinsta.Instagram) *goinsta.Item {
 		}
 		return fmt.Sprintf("%d + %d reels", n, len(reels.Items)), nil
 	})
+	r.step("TrendingAudio (2 pages)", func() (string, error) {
+		trending := insta.TrendingAudio(goinsta.TrendingAudioAll)
+		if err := page(ctx, trending.Next); err != nil || len(trending.Items) == 0 {
+			return "no trending audio", err
+		}
+		top := trending.Items[0]
+		if err := page(ctx, trending.Next); err != nil {
+			return "", err
+		}
+		return expect(top.TrendRank == 1 && len(trending.Items) > 0 && trending.Items[0].TrendRank == 11,
+			"#1 %s by %s (%s), page 2 from #%d", top.Title, top.Artist, top.ReelsCount, trending.Items[0].TrendRank)
+	})
+	r.step("StoryTrendingMusic + MusicBrowser (story, Reels)", func() (string, error) {
+		story := insta.StoryTrendingMusic()
+		if err := page(ctx, story.Next); err != nil {
+			return "", err
+		}
+		counts := []int{len(story.Items)}
+		for _, s := range []goinsta.MusicSurface{goinsta.MusicStory, goinsta.MusicReels} {
+			lists, err := insta.MusicBrowser(ctx, s)
+			if err != nil {
+				return "", err
+			}
+			counts = append(counts, len(lists))
+		}
+		return expect(counts[0] > 0 && counts[1] > 0 && counts[2] > 0,
+			"%d story tracks, %d story playlists, %d Reels playlists", counts[0], counts[1], counts[2])
+	})
 	return firstPost
 }
 

@@ -122,6 +122,10 @@ live response.
   its own form field beside `bloks_versioning_id` and `bk_client_context`. Seen live: the
   map packed into one `params` field answers 400 with an empty message; a `com.instagram.*`
   app sent as `IGBloksAppRootQuery` answers `field_exception`.
+- Music lists are plain-form POSTs under `music/` with `product` naming the composer
+  (builder `X.069o`, classes7; notes in `$R/trending-audio.md`). `music/trending/` answers
+  an empty list for the Reels product; `music/top_trends/` pages by `max_id`, the others by
+  `cursor`.
 - A screen often only lays out its sections; each one loads as an async component named in
   the screen's `app_id_expr`/`params`. The story insights screen does this.
 - The Waydroid emulator (NVIDIA venus mode) cannot encode video, so Reels cannot be
