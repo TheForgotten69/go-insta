@@ -1,9 +1,7 @@
 package goinsta
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -13,21 +11,14 @@ import (
 // The unit bodies are the live answers for a 12-day-old story with 5 viewers
 // on the Creator test account (2026-11-08).
 func TestStoryInsights(t *testing.T) {
-	raw, err := os.ReadFile("testdata/storyinsights.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var bodies map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &bodies); err != nil {
-		t.Fatal(err)
-	}
+	bodies := testBodies(t, "storyinsights")
 	insta, _ := newReplay(t)
 	got := capture(t, insta, func(s sent) (int, string) {
 		if strings.HasSuffix(s.req.URL.Path, "/info/") {
 			return 200, `{"items":[{"pk":"4017339574726819587","id":"4017339574726819587_42865264907","fbid":18386150089230004}],"status":"ok"}`
 		}
 		app := strings.TrimPrefix(s.payload["fb_api_req_friendly_name"].(string), friendlyBloksAppRoot+storyInsightsApp)
-		return 200, string(bodies["story_insights_"+app])
+		return 200, bodies["story_insights_"+app]
 	})
 	in, err := testItem(insta, "4017339574726819587_42865264907").StoryInsights(t.Context())
 	if err != nil {

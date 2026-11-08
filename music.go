@@ -24,6 +24,8 @@ const (
 // Audio is a licensed track or an original sound. Trending is the arrow the
 // app draws on audio that is trending in Reels; TrendRank is 0 when unranked.
 type Audio struct {
+	insta *Instagram
+
 	AudioAssetID      string
 	AudioClusterID    string // licensed tracks only
 	IsOriginalSound   bool
@@ -41,6 +43,9 @@ type Audio struct {
 // MusicPlaylist is one section of the music picker's first page ("For you",
 // "Featured", …) with its preview audio.
 type MusicPlaylist struct {
+	insta   *Instagram
+	surface MusicSurface
+
 	ID      string
 	Title   string
 	Type    string // for_you, artist_spotlight, default_playlist_type
@@ -85,49 +90,49 @@ type musicItem struct {
 }
 
 // audio returns nil for items that are neither (imported audio).
-func (m musicItem) audio() *Audio {
-	if t := m.Track; t != nil {
-		return &Audio{
-			AudioAssetID: t.AudioAssetID, AudioClusterID: t.AudioClusterID, Title: t.Title, Artist: t.DisplayArtist,
-			DurationMs: t.DurationInMs, CoverURL: t.CoverArtworkURI, DownloadURL: t.ProgressiveDownloadURL,
-			Trending: m.Metadata.IsTrendingInClips, TrendRank: m.Metadata.TrendRank,
-			PreviousTrendRank: m.Metadata.PreviousTrendRank, ReelsCount: m.Metadata.FormattedClipsMediaCount,
+func (m musicItem) audio(insta *Instagram) *Audio {
+	var a *Audio
+	var ranks trendRanks
+	var trending bool
+	switch t, o := m.Track, m.OriginalSound; {
+	case t != nil:
+		a = &Audio{
+			AudioAssetID:   t.AudioAssetID,
+			AudioClusterID: t.AudioClusterID,
+			Title:          t.Title,
+			Artist:         t.DisplayArtist,
+			DurationMs:     t.DurationInMs,
+			CoverURL:       t.CoverArtworkURI,
+			DownloadURL:    t.ProgressiveDownloadURL,
 		}
-	}
-	if o := m.OriginalSound; o != nil {
-		return &Audio{
-			AudioAssetID: o.AudioAssetID.String(), IsOriginalSound: true, Title: o.OriginalAudioTitle, Artist: o.IgArtist.Username,
-			DurationMs: o.DurationInMs, CoverURL: o.IgArtist.ProfilePicURL, DownloadURL: o.ProgressiveDownloadURL,
-			Trending: o.ConsumptionInfo.IsTrendingInClips, TrendRank: o.TrendRank,
-			PreviousTrendRank: o.PreviousTrendRank, ReelsCount: o.FormattedClipsMediaCount,
+		ranks, trending = m.Metadata.trendRanks, m.Metadata.IsTrendingInClips
+	case o != nil:
+		a = &Audio{
+			AudioAssetID:    o.AudioAssetID.String(),
+			IsOriginalSound: true,
+			Title:           o.OriginalAudioTitle,
+			Artist:          o.IgArtist.Username,
+			DurationMs:      o.DurationInMs,
+			CoverURL:        o.IgArtist.ProfilePicURL,
+			DownloadURL:     o.ProgressiveDownloadURL,
 		}
+		ranks, trending = o.trendRanks, o.ConsumptionInfo.IsTrendingInClips
+	default:
+		return nil
 	}
-	return nil
+	a.insta, a.Trending = insta, trending
+	a.TrendRank, a.PreviousTrendRank, a.ReelsCount = ranks.TrendRank, ranks.PreviousTrendRank, ranks.FormattedClipsMediaCount
+	return a
 }
 
-func audios(items []musicItem) []*Audio {
+func audios(insta *Instagram, items []musicItem) []*Audio {
 	out := make([]*Audio, 0, len(items))
 	for _, it := range items {
-		if a := it.audio(); a != nil {
+		if a := it.audio(insta); a != nil {
 			out = append(out, a)
 		}
 	}
 	return out
-}
-
-type musicPage struct {
-	Items    []musicItem `json:"items"`
-	PageInfo struct {
-		NextMaxID     *string `json:"next_max_id"`
-		MoreAvailable bool    `json:"more_available"`
-	} `json:"page_info"`
-}
-
-func (p *musicPage) next() string {
-	if p.PageInfo.NextMaxID == nil {
-		return ""
-	}
-	return cursorIf(p.PageInfo.MoreAvailable, *p.PageInfo.NextMaxID)
 }
 
 // musicPager pages through a music list; form builds each page's request from
@@ -135,12 +140,18 @@ func (p *musicPage) next() string {
 func (insta *Instagram) musicPager(endpoint string, form func(cursor string) any) *Pager[*Audio] {
 	var cursor string
 	return newPager(func(ctx context.Context) ([]*Audio, string, error) {
-		var page musicPage
+		var page struct {
+			Items    []musicItem `json:"items"`
+			PageInfo struct {
+				NextMaxID     string `json:"next_max_id"`
+				MoreAvailable bool   `json:"more_available"`
+			} `json:"page_info"`
+		}
 		if err := insta.callJSON(ctx, &reqOptions{Endpoint: endpoint, IsPost: true, Form: form(cursor)}, &page); err != nil {
 			return nil, "", err
 		}
-		cursor = page.next()
-		return audios(page.Items), cursor, nil
+		cursor = cursorIf(page.PageInfo.MoreAvailable, page.PageInfo.NextMaxID)
+		return audios(insta, page.Items), cursor, nil
 	})
 }
 
@@ -177,21 +188,22 @@ func (insta *Instagram) musicForm(surface MusicSurface, sessionID, cursor string
 	return f
 }
 
-// StoryTrendingMusic pages through the popular tracks the story music sticker
-// lists, 30 a page. Instagram answers this list for stories, not for Reels.
-func (insta *Instagram) StoryTrendingMusic() *Pager[*Audio] {
+func (insta *Instagram) browsePager(endpoint string, surface MusicSurface) *Pager[*Audio] {
 	sessionID := generateUUID()
-	return insta.musicPager(urlMusicTrending, func(cursor string) any {
-		return insta.musicForm(MusicStory, sessionID, cursor)
+	return insta.musicPager(endpoint, func(cursor string) any {
+		return insta.musicForm(surface, sessionID, cursor)
 	})
 }
 
-// PlaylistAudio pages through a MusicBrowser playlist ("See more" in the app).
-func (insta *Instagram) PlaylistAudio(surface MusicSurface, playlistID string) *Pager[*Audio] {
-	sessionID := generateUUID()
-	return insta.musicPager(fmt.Sprintf(urlMusicPlaylist, playlistID), func(cursor string) any {
-		return insta.musicForm(surface, sessionID, cursor)
-	})
+// StoryTrendingMusic pages through the popular tracks the story music sticker
+// lists, 30 a page. Instagram answers this list for stories, not for Reels.
+func (insta *Instagram) StoryTrendingMusic() *Pager[*Audio] {
+	return insta.browsePager(urlMusicTrending, MusicStory)
+}
+
+// AllAudio pages through the whole playlist ("See more" in the app).
+func (p *MusicPlaylist) AllAudio() *Pager[*Audio] {
+	return p.insta.browsePager(fmt.Sprintf(urlMusicPlaylist, p.ID), p.surface)
 }
 
 type musicSearchForm struct {
@@ -209,8 +221,11 @@ func (insta *Instagram) SearchMusic(surface MusicSurface, q string) *Pager[*Audi
 	return insta.musicPager(urlMusicSearch, func(cursor string) any {
 		return musicSearchForm{
 			musicBrowseForm: insta.musicForm(surface, sessionID, cursor),
-			Q:               q, SearchSessionID: searchID,
-			FromTypeahead: "false", FromSearch: "true", FromTypingPage: "false",
+			Q:               q,
+			SearchSessionID: searchID,
+			FromTypeahead:   "false",
+			FromSearch:      "true",
+			FromTypingPage:  "false",
 		}
 	})
 }
@@ -223,8 +238,9 @@ type audioPageForm struct {
 	MaxID                     string `json:"max_id,omitempty"`
 }
 
-// AudioReels pages through the Reels that use the audio (its audio page).
-func (insta *Instagram) AudioReels(a *Audio) *Pager[*Item] {
+// Reels pages through the Reels that use the audio (its audio page).
+func (a *Audio) Reels() *Pager[*Item] {
+	insta := a.insta
 	form := audioPageForm{UUID: insta.uuid}
 	if a.IsOriginalSound {
 		form.OriginalSoundAudioAssetID = a.AudioAssetID
@@ -258,7 +274,7 @@ func (insta *Instagram) AudioReels(a *Audio) *Pager[*Item] {
 var musicBrowsers = map[MusicSurface]string{MusicReels: urlMusicClipsBrowser, MusicStory: urlMusicStoriesBrowser}
 
 // MusicBrowser loads the first page of a composer's music picker.
-func (insta *Instagram) MusicBrowser(ctx context.Context, surface MusicSurface) ([]MusicPlaylist, error) {
+func (insta *Instagram) MusicBrowser(ctx context.Context, surface MusicSurface) ([]*MusicPlaylist, error) {
 	endpoint, ok := musicBrowsers[surface]
 	if !ok {
 		return nil, fmt.Errorf("music browser: unknown surface %q", surface)
@@ -278,10 +294,11 @@ func (insta *Instagram) MusicBrowser(ctx context.Context, surface MusicSurface) 
 	if err != nil {
 		return nil, err
 	}
-	out := make([]MusicPlaylist, len(resp.Items))
+	out := make([]*MusicPlaylist, len(resp.Items))
 	for i, it := range resp.Items {
 		p := it.Playlist
-		out[i] = MusicPlaylist{ID: p.ID, Title: p.Title, Type: p.PlaylistType, HasMore: p.HasNextPage, Audios: audios(p.PreviewItems)}
+		out[i] = &MusicPlaylist{insta: insta, surface: surface, ID: p.ID, Title: p.Title, Type: p.PlaylistType,
+			HasMore: p.HasNextPage, Audios: audios(insta, p.PreviewItems)}
 	}
 	return out, nil
 }

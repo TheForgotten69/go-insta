@@ -23,8 +23,9 @@ func TestLiveMusic(t *testing.T) {
 	top := trending.Items[0]
 	var original *Audio
 	for _, a := range trending.Items {
-		if a.IsOriginalSound && original == nil {
+		if a.IsOriginalSound {
 			original = a
+			break
 		}
 	}
 	if err := trending.Next(ctx); err != nil {
@@ -51,13 +52,14 @@ func TestLiveMusic(t *testing.T) {
 		for _, l := range lists {
 			t.Logf("%s: %s (%s) %d audios more=%v", s, l.Title, l.Type, len(l.Audios), l.HasMore)
 		}
-		pl := insta.PlaylistAudio(s, lists[len(lists)-1].ID)
+		last := lists[len(lists)-1]
+		pl := last.AllAudio()
 		for range 2 {
 			if err := pl.Next(ctx); err != nil {
-				t.Fatalf("%s playlist %s: %v", s, lists[len(lists)-1].Title, err)
+				t.Fatalf("%s playlist %s: %v", s, last.Title, err)
 			}
 		}
-		t.Logf("%s: %s page 2 has %d audios", s, lists[len(lists)-1].Title, len(pl.Items))
+		t.Logf("%s: %s page 2 has %d audios", s, last.Title, len(pl.Items))
 	}
 
 	search := insta.SearchMusic(MusicReels, "november")
@@ -70,7 +72,7 @@ func TestLiveMusic(t *testing.T) {
 		if a == nil {
 			continue
 		}
-		reels := insta.AudioReels(a)
+		reels := a.Reels()
 		for range 2 {
 			if err := reels.Next(ctx); err != nil {
 				t.Fatalf("reels of %s: %v", a.Title, err)

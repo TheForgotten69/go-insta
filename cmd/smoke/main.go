@@ -453,37 +453,37 @@ func readFeeds(r *runner, insta *goinsta.Instagram) *goinsta.Item {
 		return expect(top.TrendRank == 1 && len(trending.Items) > 0 && trending.Items[0].TrendRank == 11,
 			"#1 %s by %s (%s), page 2 from #%d", top.Title, top.Artist, top.ReelsCount, trending.Items[0].TrendRank)
 	})
-	r.step("StoryTrendingMusic + MusicBrowser (story, Reels)", func() (string, error) {
+	r.step("StoryTrendingMusic + MusicBrowser + AllAudio", func() (string, error) {
 		story := insta.StoryTrendingMusic()
 		if err := page(ctx, story.Next); err != nil {
 			return "", err
 		}
-		counts := []int{len(story.Items)}
+		summary := fmt.Sprintf("%d story tracks", len(story.Items))
+		ok := len(story.Items) > 0
 		for _, s := range []goinsta.MusicSurface{goinsta.MusicStory, goinsta.MusicReels} {
 			lists, err := insta.MusicBrowser(ctx, s)
-			if err != nil {
+			if err != nil || len(lists) == 0 {
+				return "no playlists", err
+			}
+			all := lists[len(lists)-1].AllAudio()
+			if err := page(ctx, all.Next); err != nil {
 				return "", err
 			}
-			counts = append(counts, len(lists))
+			summary += fmt.Sprintf(", %d %s playlists (%s: %d)", len(lists), s, lists[len(lists)-1].Title, len(all.Items))
+			ok = ok && len(all.Items) > 0
 		}
-		return expect(counts[0] > 0 && counts[1] > 0 && counts[2] > 0,
-			"%d story tracks, %d story playlists, %d Reels playlists", counts[0], counts[1], counts[2])
+		return expect(ok, "%s", summary)
 	})
-	r.step("SearchMusic + PlaylistAudio + AudioReels", func() (string, error) {
+	r.step("SearchMusic + audio.Reels", func() (string, error) {
 		search := insta.SearchMusic(goinsta.MusicReels, "november")
 		if err := page(ctx, search.Next); err != nil || len(search.Items) == 0 {
 			return "no results", err
 		}
-		pl := insta.PlaylistAudio(goinsta.MusicReels, "2282005535164995")
-		if err := page(ctx, pl.Next); err != nil {
-			return "", err
-		}
-		reels := insta.AudioReels(search.Items[0])
+		reels := search.Items[0].Reels()
 		if err := page(ctx, reels.Next); err != nil {
 			return "", err
 		}
-		return expect(len(pl.Items) > 0 && len(reels.Items) > 0, "%d results, %d For you, %d reels of %s",
-			len(search.Items), len(pl.Items), len(reels.Items), search.Items[0].Title)
+		return expect(len(reels.Items) > 0, "%d results, %d reels of %s", len(search.Items), len(reels.Items), search.Items[0].Title)
 	})
 	return firstPost
 }

@@ -2,32 +2,31 @@ package goinsta
 
 import (
 	"encoding/json"
-	"os"
 	"testing"
 )
 
-// Live answers on the test account (2026-11-08), cut to two or three items,
-// CDN query strings, DASH manifests and "status" removed (fixture() reads every
-// testdata file as httplog entries, whose status is a number).
-func musicBodies(t *testing.T) map[string]string {
+// testdata/bodies/music.json: live answers on the test account (2026-11-08), cut
+// to two or three items, CDN query strings and DASH manifests removed.
+
+// nextCursor reads the cursor a recorded body hands to the next page.
+func nextCursor(t *testing.T, body string) string {
 	t.Helper()
-	raw, err := os.ReadFile("testdata/music.json")
-	if err != nil {
+	var r struct {
+		PageInfo struct {
+			NextMaxID string `json:"next_max_id"`
+		} `json:"page_info"`
+		PagingInfo struct {
+			MaxID string `json:"max_id"`
+		} `json:"paging_info"`
+	}
+	if err := json.Unmarshal([]byte(body), &r); err != nil {
 		t.Fatal(err)
 	}
-	var bodies map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &bodies); err != nil {
-		t.Fatal(err)
-	}
-	out := map[string]string{}
-	for k, v := range bodies {
-		out[k] = string(v)
-	}
-	return out
+	return r.PageInfo.NextMaxID + r.PagingInfo.MaxID
 }
 
 func TestTrendingAudio(t *testing.T) {
-	bodies := musicBodies(t)
+	bodies := testBodies(t, "music")
 	insta, _ := newReplay(t)
 	got := capture(t, insta, func(s sent) (int, string) {
 		if s.payload["max_id"] != nil {
@@ -45,7 +44,7 @@ func TestTrendingAudio(t *testing.T) {
 		first.payload["_uuid"] != insta.uuid || first.payload["max_id"] != nil {
 		t.Errorf("page 1 request: %s %v", first.req.URL.Path, first.payload)
 	}
-	if second.payload["max_id"] == nil || second.payload["max_id"] == "" {
+	if second.payload["max_id"] != nextCursor(t, bodies["music_top_trends"]) {
 		t.Errorf("page 2 max_id = %v", second.payload["max_id"])
 	}
 	if len(list) != 3 {
@@ -62,7 +61,7 @@ func TestTrendingAudio(t *testing.T) {
 }
 
 func TestStoryTrendingMusic(t *testing.T) {
-	bodies := musicBodies(t)
+	bodies := testBodies(t, "music")
 	insta, _ := newReplay(t)
 	got := capture(t, insta, answer(bodies["music_trending"]))
 	p := insta.StoryTrendingMusic()
@@ -86,7 +85,7 @@ func TestStoryTrendingMusic(t *testing.T) {
 }
 
 func TestMusicBrowser(t *testing.T) {
-	bodies := musicBodies(t)
+	bodies := testBodies(t, "music")
 	insta, _ := newReplay(t)
 	got := capture(t, insta, answer(bodies["music_stories_browser"]))
 	lists, err := insta.MusicBrowser(t.Context(), MusicStory)
@@ -107,7 +106,7 @@ func TestMusicBrowser(t *testing.T) {
 }
 
 func TestPlaylistAndSearchMusic(t *testing.T) {
-	bodies := musicBodies(t)
+	bodies := testBodies(t, "music")
 	insta, _ := newReplay(t)
 	got := capture(t, insta, func(s sent) (int, string) {
 		if s.req.URL.Path == "/api/v1/music/search_v2/" {
@@ -115,7 +114,7 @@ func TestPlaylistAndSearchMusic(t *testing.T) {
 		}
 		return 200, bodies["music_playlist"]
 	})
-	pl := insta.PlaylistAudio(MusicReels, "2282005535164995")
+	pl := (&MusicPlaylist{insta: insta, surface: MusicReels, ID: "2282005535164995"}).AllAudio()
 	for range 2 {
 		if err := pl.Next(t.Context()); err != nil {
 			t.Fatal(err)
@@ -142,12 +141,11 @@ func TestPlaylistAndSearchMusic(t *testing.T) {
 	}
 }
 
-func TestAudioReels(t *testing.T) {
-	bodies := musicBodies(t)
+func TestAudioReelsPage(t *testing.T) {
+	bodies := testBodies(t, "music")
 	insta, _ := newReplay(t)
 	got := capture(t, insta, answer(bodies["clips_music"]))
-	track := &Audio{AudioAssetID: "1115857888092269", AudioClusterID: "831681715950717"}
-	reels := insta.AudioReels(track)
+	reels := (&Audio{insta: insta, AudioAssetID: "1115857888092269", AudioClusterID: "831681715950717"}).Reels()
 	for range 2 {
 		if err := reels.Next(t.Context()); err != nil {
 			t.Fatal(err)
@@ -158,7 +156,7 @@ func TestAudioReels(t *testing.T) {
 		first.payload["audio_cluster_id"] != "831681715950717" || first.payload["max_id"] != nil {
 		t.Errorf("page 1 request: %v", first.payload)
 	}
-	if second.payload["max_id"] == nil || second.payload["max_id"] == "" {
+	if second.payload["max_id"] != nextCursor(t, bodies["clips_music"]) {
 		t.Errorf("page 2 max_id = %v", second.payload["max_id"])
 	}
 	if len(reels.Items) != 2 || reels.Items[0].Code != "DfWat9woBuY" || reels.Items[0].Index != 2 {
@@ -166,7 +164,7 @@ func TestAudioReels(t *testing.T) {
 	}
 
 	got = capture(t, insta, answer(bodies["clips_music"]))
-	_ = insta.AudioReels(&Audio{AudioAssetID: "28952492164372492", IsOriginalSound: true}).Next(t.Context())
+	_ = (&Audio{insta: insta, AudioAssetID: "28952492164372492", IsOriginalSound: true}).Reels().Next(t.Context())
 	if p := (*got)[0].payload; p["original_sound_audio_asset_id"] != "28952492164372492" || p["audio_asset_id"] != nil {
 		t.Errorf("original sound request: %v", p)
 	}

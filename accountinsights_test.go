@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -13,15 +12,8 @@ import (
 // Live responses on the Creator test account (2026-10-31), lists cut to two
 // entries; the bio links bodies are made up, as that account has no links.
 func accountInsightsBodies(t *testing.T) map[string]string {
-	raw, err := os.ReadFile("testdata/accountinsights.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var live map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &live); err != nil {
-		t.Fatal(err)
-	}
-	bodies := map[string]string{
+	bodies := testBodies(t, "accountinsights")
+	for name, body := range map[string]string{
 		friendlyAccountInsightsBioLinks: `{"data":{"ig_account_insights":{"bio_links":{
 			"taps":{"value":7,"benchmark":{"value":3.5,"comparison":"HIGHER","sentiment":"POSITIVE","display_string":"2x"}},
 			"page_views":{"value":70},
@@ -29,9 +21,8 @@ func accountInsightsBodies(t *testing.T) map[string]string {
 			"previous_links":{"has_links":true}}}}}`,
 		friendlyAccountInsightsPrevBioLinks: `{"data":{"ig_account_insights":{"bio_links":{"previous_links":{"links":{
 			"edges":[{"node":{"id":"old","title":"Old","taps":{"value":1}}}],"page_info":{"end_cursor":"p2","has_next_page":false}}}}}}}`,
-	}
-	for name, body := range live {
-		bodies[name] = string(body)
+	} {
+		bodies[name] = body
 	}
 	return bodies
 }

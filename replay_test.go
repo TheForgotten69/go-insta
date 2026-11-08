@@ -65,6 +65,25 @@ func fixture(t *testing.T, name string) httplog.Entry {
 	return e
 }
 
+// testBodies loads testdata/bodies/<name>.json: raw response bodies keyed by
+// name, kept apart from the httplog fixtures fixture() reads.
+func testBodies(t *testing.T, name string) map[string]string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "bodies", name+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	bodies := make(map[string]string, len(m))
+	for k, v := range m {
+		bodies[k] = string(v)
+	}
+	return bodies
+}
+
 // The first capture cut bodies at 64 KiB; such responses cannot be decoded.
 func truncated(e httplog.Entry) bool {
 	body := strings.TrimSpace(e.RespBody)
