@@ -469,6 +469,22 @@ func readFeeds(r *runner, insta *goinsta.Instagram) *goinsta.Item {
 		return expect(counts[0] > 0 && counts[1] > 0 && counts[2] > 0,
 			"%d story tracks, %d story playlists, %d Reels playlists", counts[0], counts[1], counts[2])
 	})
+	r.step("SearchMusic + PlaylistAudio + AudioReels", func() (string, error) {
+		search := insta.SearchMusic(goinsta.MusicReels, "november")
+		if err := page(ctx, search.Next); err != nil || len(search.Items) == 0 {
+			return "no results", err
+		}
+		pl := insta.PlaylistAudio(goinsta.MusicReels, "2282005535164995")
+		if err := page(ctx, pl.Next); err != nil {
+			return "", err
+		}
+		reels := insta.AudioReels(search.Items[0])
+		if err := page(ctx, reels.Next); err != nil {
+			return "", err
+		}
+		return expect(len(pl.Items) > 0 && len(reels.Items) > 0, "%d results, %d For you, %d reels of %s",
+			len(search.Items), len(pl.Items), len(reels.Items), search.Items[0].Title)
+	})
 	return firstPost
 }
 

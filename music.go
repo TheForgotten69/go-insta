@@ -130,6 +130,20 @@ func (p *musicPage) next() string {
 	return cursorIf(p.PageInfo.MoreAvailable, *p.PageInfo.NextMaxID)
 }
 
+// musicPager pages through a music list; form builds each page's request from
+// the cursor the previous page returned.
+func (insta *Instagram) musicPager(endpoint string, form func(cursor string) any) *Pager[*Audio] {
+	var cursor string
+	return newPager(func(ctx context.Context) ([]*Audio, string, error) {
+		var page musicPage
+		if err := insta.callJSON(ctx, &reqOptions{Endpoint: endpoint, IsPost: true, Form: form(cursor)}, &page); err != nil {
+			return nil, "", err
+		}
+		cursor = page.next()
+		return audios(page.Items), cursor, nil
+	})
+}
+
 type topTrendsForm struct {
 	UUID            string           `json:"_uuid"`
 	Product         string           `json:"product"`
@@ -142,17 +156,8 @@ type topTrendsForm struct {
 // Trending tab ranks the same audio). The followers tab is empty for an account
 // whose followers have not used any.
 func (insta *Instagram) TrendingAudio(tab TrendingAudioTab) *Pager[*Audio] {
-	var maxID string
-	return newPager(func(ctx context.Context) ([]*Audio, string, error) {
-		var page musicPage
-		err := insta.callJSON(ctx, &reqOptions{Endpoint: urlMusicTopTrends, IsPost: true, Form: topTrendsForm{
-			UUID: insta.uuid, Product: "ig_trending_audio_list", TopAudioTabType: tab, PageSize: "10", MaxID: maxID,
-		}}, &page)
-		if err != nil {
-			return nil, "", err
-		}
-		maxID = page.next()
-		return audios(page.Items), maxID, nil
+	return insta.musicPager(urlMusicTopTrends, func(maxID string) any {
+		return topTrendsForm{UUID: insta.uuid, Product: "ig_trending_audio_list", TopAudioTabType: tab, PageSize: "10", MaxID: maxID}
 	})
 }
 
@@ -164,8 +169,8 @@ type musicBrowseForm struct {
 	Cursor                 string       `json:"cursor,omitempty"`
 }
 
-func (insta *Instagram) musicForm(surface MusicSurface, sessionID string) musicBrowseForm {
-	f := musicBrowseForm{UUID: insta.uuid, Product: surface, BrowseSessionID: sessionID}
+func (insta *Instagram) musicForm(surface MusicSurface, sessionID, cursor string) musicBrowseForm {
+	f := musicBrowseForm{UUID: insta.uuid, Product: surface, BrowseSessionID: sessionID, Cursor: cursor}
 	if surface == MusicStory {
 		f.ShouldDisableExposures = "true"
 	}
@@ -176,16 +181,77 @@ func (insta *Instagram) musicForm(surface MusicSurface, sessionID string) musicB
 // lists, 30 a page. Instagram answers this list for stories, not for Reels.
 func (insta *Instagram) StoryTrendingMusic() *Pager[*Audio] {
 	sessionID := generateUUID()
-	var cursor string
-	return newPager(func(ctx context.Context) ([]*Audio, string, error) {
-		form := insta.musicForm(MusicStory, sessionID)
-		form.Cursor = cursor
-		var page musicPage
-		if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlMusicTrending, IsPost: true, Form: form}, &page); err != nil {
+	return insta.musicPager(urlMusicTrending, func(cursor string) any {
+		return insta.musicForm(MusicStory, sessionID, cursor)
+	})
+}
+
+// PlaylistAudio pages through a MusicBrowser playlist ("See more" in the app).
+func (insta *Instagram) PlaylistAudio(surface MusicSurface, playlistID string) *Pager[*Audio] {
+	sessionID := generateUUID()
+	return insta.musicPager(fmt.Sprintf(urlMusicPlaylist, playlistID), func(cursor string) any {
+		return insta.musicForm(surface, sessionID, cursor)
+	})
+}
+
+type musicSearchForm struct {
+	musicBrowseForm
+	Q               string `json:"q"`
+	SearchSessionID string `json:"search_session_id"`
+	FromTypeahead   string `json:"from_typeahead"`
+	FromSearch      string `json:"from_search"`
+	FromTypingPage  string `json:"from_typing_page"`
+}
+
+// SearchMusic pages through the music picker's search results for q.
+func (insta *Instagram) SearchMusic(surface MusicSurface, q string) *Pager[*Audio] {
+	sessionID, searchID := generateUUID(), generateUUID()
+	return insta.musicPager(urlMusicSearch, func(cursor string) any {
+		return musicSearchForm{
+			musicBrowseForm: insta.musicForm(surface, sessionID, cursor),
+			Q:               q, SearchSessionID: searchID,
+			FromTypeahead: "false", FromSearch: "true", FromTypingPage: "false",
+		}
+	})
+}
+
+type audioPageForm struct {
+	UUID                      string `json:"_uuid"`
+	AudioAssetID              string `json:"audio_asset_id,omitempty"`
+	AudioClusterID            string `json:"audio_cluster_id,omitempty"`
+	OriginalSoundAudioAssetID string `json:"original_sound_audio_asset_id,omitempty"`
+	MaxID                     string `json:"max_id,omitempty"`
+}
+
+// AudioReels pages through the Reels that use the audio (its audio page).
+func (insta *Instagram) AudioReels(a *Audio) *Pager[*Item] {
+	form := audioPageForm{UUID: insta.uuid}
+	if a.IsOriginalSound {
+		form.OriginalSoundAudioAssetID = a.AudioAssetID
+	} else {
+		// The app sends the cluster id as both.
+		form.AudioAssetID, form.AudioClusterID = a.AudioClusterID, a.AudioClusterID
+	}
+	var pos int
+	return newPager(func(ctx context.Context) ([]*Item, string, error) {
+		var page struct {
+			Items []struct {
+				Media *Item `json:"media"`
+			} `json:"items"`
+			PagingInfo struct {
+				MaxID         string `json:"max_id"`
+				MoreAvailable bool   `json:"more_available"`
+			} `json:"paging_info"`
+		}
+		if err := insta.callJSON(ctx, &reqOptions{Endpoint: urlClipsMusic, IsPost: true, Form: form}, &page); err != nil {
 			return nil, "", err
 		}
-		cursor = page.next()
-		return audios(page.Items), cursor, nil
+		items := make([]*Item, len(page.Items))
+		for i, it := range page.Items {
+			items[i] = it.Media
+		}
+		form.MaxID = cursorIf(page.PagingInfo.MoreAvailable, page.PagingInfo.MaxID)
+		return numberItems(items, insta, "audio_page", &pos), form.MaxID, nil
 	})
 }
 
@@ -208,7 +274,7 @@ func (insta *Instagram) MusicBrowser(ctx context.Context, surface MusicSurface) 
 			} `json:"playlist"`
 		} `json:"items"`
 	}
-	err := insta.callJSON(ctx, &reqOptions{Endpoint: endpoint, IsPost: true, Form: insta.musicForm(surface, generateUUID())}, &resp)
+	err := insta.callJSON(ctx, &reqOptions{Endpoint: endpoint, IsPost: true, Form: insta.musicForm(surface, generateUUID(), "")}, &resp)
 	if err != nil {
 		return nil, err
 	}

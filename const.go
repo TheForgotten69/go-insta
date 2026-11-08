@@ -132,6 +132,9 @@ const (
 	urlMusicTrending       = "music/trending/"
 	urlMusicStoriesBrowser = "music/stories_audio_browser/"
 	urlMusicClipsBrowser   = "music/clips_audio_browser/"
+	urlMusicPlaylist       = "music/playlist/%s/"
+	urlMusicSearch         = "music/search_v2/"
+	urlClipsMusic          = "clips/music/"
 
 	urlDirectInbox        = "direct_v2/inbox/"
 	urlDirectPendingInbox = "direct_v2/pending_inbox/"

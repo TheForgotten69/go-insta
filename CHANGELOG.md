@@ -23,7 +23,9 @@ All notable changes to this project are documented here. The project uses
   each audio's rank, previous rank, Reels count and trending arrow (the Reels picker's
   Trending tab ranks the same audio); `StoryTrendingMusic` pages through the story music
   sticker's popular tracks; `MusicBrowser` loads the story or Reels music picker's
-  playlists (For you, Featured, New releases, Original audio).
+  playlists (For you, Featured, New releases, Original audio), and `PlaylistAudio` pages
+  through one of them; `SearchMusic` searches the picker; `AudioReels` pages through the
+  Reels that use an audio (its audio page).
 
 ## [0.7.2] - 2026-11-01
 

@@ -105,3 +105,69 @@ func TestMusicBrowser(t *testing.T) {
 		t.Error("unknown surface: no error")
 	}
 }
+
+func TestPlaylistAndSearchMusic(t *testing.T) {
+	bodies := musicBodies(t)
+	insta, _ := newReplay(t)
+	got := capture(t, insta, func(s sent) (int, string) {
+		if s.req.URL.Path == "/api/v1/music/search_v2/" {
+			return 200, bodies["music_search"]
+		}
+		return 200, bodies["music_playlist"]
+	})
+	pl := insta.PlaylistAudio(MusicReels, "2282005535164995")
+	for range 2 {
+		if err := pl.Next(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	search := insta.SearchMusic(MusicReels, "november")
+	if err := search.Next(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	p1, p2, s := (*got)[0], (*got)[1], (*got)[2]
+	if p1.req.URL.Path != "/api/v1/music/playlist/2282005535164995/" || p1.payload["product"] != string(MusicReels) ||
+		p1.payload["cursor"] != nil || p2.payload["cursor"] != "61" || p1.payload["should_disable_exposures"] != nil {
+		t.Errorf("playlist requests: %v / %v", p1.payload, p2.payload)
+	}
+	if a := pl.Items[0]; !a.IsOriginalSound || a.AudioAssetID != "796523205870974" {
+		t.Errorf("playlist audio = %+v", a)
+	}
+	if s.payload["q"] != "november" || s.payload["from_search"] != "true" || s.payload["from_typeahead"] != "false" ||
+		s.payload["from_typing_page"] != "false" || s.payload["search_session_id"] == "" || s.payload["browse_session_id"] == "" {
+		t.Errorf("search request: %v", s.payload)
+	}
+	if len(search.Items) != 2 || search.Items[0].Title != "November" {
+		t.Errorf("search = %+v", search.Items)
+	}
+}
+
+func TestAudioReels(t *testing.T) {
+	bodies := musicBodies(t)
+	insta, _ := newReplay(t)
+	got := capture(t, insta, answer(bodies["clips_music"]))
+	track := &Audio{AudioAssetID: "1115857888092269", AudioClusterID: "831681715950717"}
+	reels := insta.AudioReels(track)
+	for range 2 {
+		if err := reels.Next(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, second := (*got)[0], (*got)[1]
+	if first.req.URL.Path != "/api/v1/clips/music/" || first.payload["audio_asset_id"] != "831681715950717" ||
+		first.payload["audio_cluster_id"] != "831681715950717" || first.payload["max_id"] != nil {
+		t.Errorf("page 1 request: %v", first.payload)
+	}
+	if second.payload["max_id"] == nil || second.payload["max_id"] == "" {
+		t.Errorf("page 2 max_id = %v", second.payload["max_id"])
+	}
+	if len(reels.Items) != 2 || reels.Items[0].Code != "DfWat9woBuY" || reels.Items[0].Index != 2 {
+		t.Errorf("reels = %+v", reels.Items)
+	}
+
+	got = capture(t, insta, answer(bodies["clips_music"]))
+	_ = insta.AudioReels(&Audio{AudioAssetID: "28952492164372492", IsOriginalSound: true}).Next(t.Context())
+	if p := (*got)[0].payload; p["original_sound_audio_asset_id"] != "28952492164372492" || p["audio_asset_id"] != nil {
+		t.Errorf("original sound request: %v", p)
+	}
+}
